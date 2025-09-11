@@ -1,0 +1,74 @@
+# Claude Code Configuration Files
+
+.claude/
+.claude/*
+.serena/*
+
+
+# Node.js Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build Outputs
+dist/
+build/
+target/
+
+# Environment Files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Rust Build Files  
+target/
+backend/target/
+Cargo.lock
+
+# Angular Build Files
+.angular/
+.ng_build_cache/
+
+# Test Coverage
+coverage/
+*.lcov
+
+# Logs
+logs/
+*.log
+
+# Temporary Files
+*.tmp
+*.temp
+.cache/
+
+# Playwright Test Results
+test-results/
+playwright-report/
+.playwright-mcp/
+
+.bmad-core/
+.docs/
+
+.gitignore

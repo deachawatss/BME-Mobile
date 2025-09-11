@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "dev:backend": "node scripts/dev-all.js --backend",
+    "dev:frontend": "node scripts/dev-all.js --frontend",
+    "dev:all": "node scripts/dev-all.js",
+    "test:e2e": "node scripts/test-e2e.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.55.0",
+    "playwright": "^1.55.0"
+  }
+}

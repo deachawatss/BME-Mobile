@@ -1,0 +1,108 @@
+<!-- Print Dialog (Screen View) -->
+<div class="print-dialog" *ngIf="labels.length > 0">
+  <!-- Dialog Header (only visible on screen) -->
+  <div class="dialog-header screen-only">
+    <h2>Print Bulk Picking Labels</h2>
+    <p>{{ labels.length }} label(s) ready to print</p>
+    <div class="dialog-actions">
+      <button type="button" (click)="printLabels()" class="nwfth-button-primary">
+        🖨️ Print Labels
+      </button>
+      <button type="button" (click)="closeDialog()" class="nwfth-button-secondary">
+        Cancel
+      </button>
+    </div>
+  </div>
+  
+  <!-- Labels Container -->
+  <div class="labels-container">
+    <div class="label-page" *ngFor="let label of labels">
+      
+      <!-- Label Header -->
+      <div class="label-header">
+        <div class="label-title">{{ label.header.title }}</div>
+        <div class="label-product-type">{{ label.header.productType }}</div>
+        <div class="label-date">{{ label.header.date }}</div>
+        <div class="header-divider"></div>
+      </div>
+      
+      <!-- Product Information -->
+      <div class="product-info">
+        <div class="product-line">
+          <span class="product-label">Product:</span>
+          <span class="product-key">{{ label.productInfo.productKey }}</span>
+          <span class="product-desc">{{ label.productInfo.description }}</span>
+        </div>
+        <div class="run-batch-info">
+          <div class="run-info">
+            <span class="info-label">Run:</span>
+            <span class="info-value">{{ label.productInfo.runNo }}</span>
+            <span class="date-label">Date:</span>
+            <span class="date-value">{{ label.header.date }}</span>
+          </div>
+          <div class="batch-page-info">
+            <span class="batch-label">Batch:</span>
+            <span class="batch-value">{{ label.productInfo.batchNo }}</span>
+            <span class="page-value">{{ label.productInfo.pageInfo }}</span>
+          </div>
+        </div>
+        <div class="product-divider"></div>
+      </div>
+      
+      <!-- Items Table -->
+      <div class="items-section">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th class="col-item">Item No.</th>
+              <th class="col-lot">Lot-No</th>
+              <th class="col-bag">Bag</th>
+              <th class="col-qty">QTY</th>
+              <th class="col-um">UM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of label.items" class="item-row">
+              <td class="item-no">{{ item.itemNo }}</td>
+              <td class="lot-info">
+                <div class="lot-no">{{ item.lotNo }}</div>
+                <div class="bin-no">{{ item.binNo }}</div>
+              </td>
+              <td class="bag-qty">
+                <div class="checkbox-container">
+                  <span class="checkbox">☐</span>
+                  <span class="bag-number">{{ item.bagQuantity }}</span>
+                </div>
+              </td>
+              <td class="qty-info">
+                <div class="total-qty">{{ item.totalQuantity | number:'1.1-1' }}</div>
+                <div class="pack-size">{{ item.packSize | number:'1.2-2' }}</div>
+              </td>
+              <td class="unit">{{ item.unit }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <!-- Footer -->
+      <div class="label-footer">
+        <div class="picked-by">
+          <span class="footer-label">Picked/Printed by:</span>
+          <span class="footer-value">{{ label.footer.pickedBy }}</span>
+        </div>
+        <div class="verified-by">{{ label.footer.verificationLine }}</div>
+        <div class="date-printed">{{ label.footer.datePrinted }}</div>
+      </div>
+      
+    </div>
+  </div>
+</div>
+
+<!-- Empty State -->
+<div class="empty-state screen-only" *ngIf="labels.length === 0">
+  <h3>No Labels to Print</h3>
+  <p>Complete picking for at least one batch to generate labels.</p>
+  <button type="button" (click)="closeDialog()" class="nwfth-button-secondary">
+    Close
+  </button>
+</div>
