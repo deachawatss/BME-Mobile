@@ -1,57 +1,42 @@
 {
-  "name": "frontend",
-  "short_name": "frontend",
+  "name": "NWFTH Warehouse Management System",
+  "short_name": "NWFTH Warehouse",
+  "description": "Newly Weds Foods (Thailand) Enterprise Warehouse Management System for bulk picking, inventory management, and warehouse operations",
   "display": "standalone",
   "scope": "./",
   "start_url": "./",
+  "theme_color": "#6D4C41",
+  "background_color": "#F5F5F5",
   "icons": [
     {
-      "src": "icons/icon-72x72.png",
-      "sizes": "72x72",
+      "src": "assets/icons/favicon-16x16.png",
+      "sizes": "16x16",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any"
     },
     {
-      "src": "icons/icon-96x96.png",
-      "sizes": "96x96",
+      "src": "assets/icons/favicon-32x32.png",
+      "sizes": "32x32",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any"
     },
     {
-      "src": "icons/icon-128x128.png",
-      "sizes": "128x128",
+      "src": "assets/icons/apple-touch-icon.png",
+      "sizes": "180x180",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any"
     },
     {
-      "src": "icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "icons/icon-152x152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "icons/icon-192x192.png",
+      "src": "assets/icons/android-chrome-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any maskable"
     },
     {
-      "src": "icons/icon-384x384.png",
-      "sizes": "384x384",
-      "type": "image/png",
-      "purpose": "maskable any"
-    },
-    {
-      "src": "icons/icon-512x512.png",
+      "src": "assets/icons/android-chrome-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable any"
+      "purpose": "any maskable"
     }
   ]
 }

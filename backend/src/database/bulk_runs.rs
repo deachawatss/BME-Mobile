@@ -3849,12 +3849,31 @@ impl Database {
                 .collect::<Vec<String>>()
                 .join(",");
                 
-            let delete_lot_transaction_query = format!(r#"
-                DELETE FROM LotTransaction
-                WHERE TransactionType = 5
-                  AND User5 = 'Picking Customization'
-                  AND LotTranNo IN ({})
-            "#, lot_tran_nos_str);
+            let delete_lot_transaction_query = if let Some(lot) = specific_lot {
+                format!(r#"
+                    DELETE FROM LotTransaction
+                    WHERE TransactionType = 5
+                      AND User5 = 'Picking Customization'
+                      AND LotTranNo IN ({})
+                      AND EXISTS (
+                          SELECT 1 FROM Cust_BulkLotPicked blp 
+                          WHERE blp.RunNo = {} AND blp.RowNum = {} AND blp.LineId = {} 
+                          AND blp.LotNo = '{}' AND LotTransaction.IssueDocNo = blp.BatchNo
+                      )
+                "#, lot_tran_nos_str, run_no, row_num, line_id, lot)
+            } else {
+                format!(r#"
+                    DELETE FROM LotTransaction
+                    WHERE TransactionType = 5
+                      AND User5 = 'Picking Customization'
+                      AND LotTranNo IN ({})
+                      AND EXISTS (
+                          SELECT 1 FROM Cust_BulkLotPicked blp 
+                          WHERE blp.RunNo = {} AND blp.LineId = {} 
+                          AND LotTransaction.IssueDocNo = blp.BatchNo
+                      )
+                "#, lot_tran_nos_str, run_no, line_id)
+            };
 
             // Execute the DELETE operation to clean up LotTransaction audit records
             client.simple_query(&delete_lot_transaction_query).await
@@ -4193,7 +4212,12 @@ impl Database {
                 WHERE TransactionType = 5
                   AND User5 = 'Picking Customization'
                   AND LotTranNo IN ({})
-            "#, lot_tran_nos_str);
+                  AND EXISTS (
+                      SELECT 1 FROM Cust_BulkLotPicked blp 
+                      WHERE blp.RunNo = {} AND blp.RowNum = {} AND blp.LineId = {} 
+                      AND blp.LotNo = '{}' AND LotTransaction.IssueDocNo = blp.BatchNo
+                  )
+            "#, lot_tran_nos_str, run_no, row_num, line_id, lot_no);
 
             // Execute the DELETE operation to clean up LotTransaction audit records
             client.simple_query(&delete_lot_transaction_query).await

@@ -54,38 +54,3 @@ pub async fn jwt_auth_middleware(
     }
 }
 
-/// Optional JWT authentication middleware
-/// Similar to jwt_auth_middleware but doesn't reject requests without tokens
-/// Instead, it adds user info if token is valid, otherwise continues without user context
-pub async fn optional_jwt_auth_middleware(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    mut request: Request,
-    next: Next,
-) -> Response {
-    // Extract Authorization header
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    // Extract token from header
-    if let Some(token) = AuthService::extract_token_from_header(auth_header) {
-        // Verify token
-        if let Ok(claims) = state.auth_service.verify_token(token) {
-            debug!("✅ Optional JWT Auth: Valid token for user: {}", claims.username);
-            
-            // Add user information to request headers for downstream handlers
-            if let Ok(user_id_header) = claims.sub.parse() {
-                request.headers_mut().insert("x-user-id", user_id_header);
-            }
-            if let Ok(username_header) = claims.username.parse() {
-                request.headers_mut().insert("x-username", username_header);
-            }
-        } else {
-            debug!("⚠️ Optional JWT Auth: Invalid token provided");
-        }
-    } else {
-        debug!("ℹ️ Optional JWT Auth: No token provided");
-    }
-
-    next.run(request).await
-}
