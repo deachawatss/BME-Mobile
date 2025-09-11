@@ -604,7 +604,7 @@ impl Database {
             WHERE bp.RunNo = @P1
               AND bp.ItemKey = @P2
               AND bp.ToPickedBulkQty > 0  -- Only batches requiring bulk picking
-            ORDER BY bp.RowNum
+            ORDER BY bp.BatchNo
         "#;
 
         let mut select = TiberiusQuery::new(query);
@@ -909,18 +909,36 @@ impl Database {
     /// Convert database row to BulkPickedItem model
     pub fn row_to_bulk_picked_item(&self, row: &Row) -> Result<BulkPickedItem> {
         // Enhanced error handling with specific context for debugging
-        let run_no: i32 = row.get("RunNo").unwrap_or_else(|| {
-            warn!("Missing RunNo field in bulk picked item row");
-            0
-        });
-        let row_num: i32 = row.get("RowNum").unwrap_or_else(|| {
-            warn!("Missing RowNum field for run {}", run_no);
-            0
-        });
-        let line_id: i32 = row.get("LineId").unwrap_or_else(|| {
-            warn!("Missing LineId field for run {}", run_no);
-            0
-        });
+        let run_no: i32 = match row.try_get::<i64, _>("RunNo") {
+            Ok(Some(val)) => val as i32,
+            _ => match row.try_get::<i32, _>("RunNo") {
+                Ok(Some(val)) => val,
+                _ => {
+                    warn!("Missing RunNo field in bulk picked item row");
+                    0
+                }
+            }
+        };
+        let row_num: i32 = match row.try_get::<i64, _>("RowNum") {
+            Ok(Some(val)) => val as i32,
+            _ => match row.try_get::<i32, _>("RowNum") {
+                Ok(Some(val)) => val,
+                _ => {
+                    warn!("Missing RowNum field for run {}", run_no);
+                    0
+                }
+            }
+        };
+        let line_id: i32 = match row.try_get::<i64, _>("LineId") {
+            Ok(Some(val)) => val as i32,
+            _ => match row.try_get::<i32, _>("LineId") {
+                Ok(Some(val)) => val,
+                _ => {
+                    warn!("Missing LineId field for run {}", run_no);
+                    0
+                }
+            }
+        };
         let item_key: &str = row.get("ItemKey").unwrap_or_else(|| {
             warn!("Missing ItemKey field for run {}", run_no);
             ""
@@ -1118,7 +1136,7 @@ impl Database {
             .await
             .context("Failed to get read database client")?;
 
-        // Simplified count query - matches official app logic, eliminates duplicates
+        // Enhanced count query with available bags validation
         let count_query = r#"
             SELECT COUNT(DISTINCT CONCAT(l.LotNo, '|', l.BinNo)) as total_count
             FROM LotMaster l
@@ -1130,6 +1148,7 @@ impl Database {
                 AND (l.LotStatus != 'H' AND l.LotStatus != 'B' OR l.LotStatus IS NULL)  -- Exclude B (Blocked) and H (Hold) statuses
                 AND (l.QtyOnHand - l.QtyCommitSales) > 0                    -- Available inventory only
                 AND l.QtyOnHand >= bp.PackSize                              -- PackSize minimum threshold validation
+                AND FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) >= 1  -- Must have at least 1 available bag
                 AND (b.User4 IS NULL OR b.User4 != 'PARTIAL')              -- Exclude partial picking bins
                 AND l.BinNo NOT LIKE '%Variance'                           -- Exclude variance bins
                 AND b.User1 NOT LIKE '%WHTIP8%'                            -- Exclude special bins
@@ -1158,7 +1177,7 @@ impl Database {
         // Calculate offset for pagination
         let offset = (page.saturating_sub(1)) * page_size;
 
-        // Simplified paginated query - matches official app logic exactly, eliminates duplicates
+        // Enhanced paginated query with available bags calculation and filtering
         let query = r#"
             SELECT DISTINCT
                 l.LotNo,
@@ -1168,6 +1187,8 @@ impl Database {
                 l.QtyIssued,
                 l.QtyCommitSales as CommitedQty,
                 (l.QtyOnHand - l.QtyCommitSales) as AvailableQty,
+                FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) as AvailableBags,
+                bp.PackSize,
                 l.ItemKey,
                 l.LocationKey,
                 CASE 
@@ -1185,6 +1206,7 @@ impl Database {
                 AND (l.LotStatus != 'H' AND l.LotStatus != 'B' OR l.LotStatus IS NULL)  -- Exclude B (Blocked) and H (Hold) statuses
                 AND (l.QtyOnHand - l.QtyCommitSales) > 0                    -- Available inventory only
                 AND l.QtyOnHand >= bp.PackSize                              -- PackSize minimum threshold validation
+                AND FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) >= 1  -- Must have at least 1 available bag
                 AND (b.User4 IS NULL OR b.User4 != 'PARTIAL')              -- Exclude partial picking bins
                 AND l.BinNo NOT LIKE '%Variance'                           -- Exclude variance bins
                 AND b.User1 NOT LIKE '%WHTIP8%'                            -- Exclude special bins
@@ -1260,6 +1282,8 @@ impl Database {
                 l.QtyIssued,
                 l.QtyCommitSales as CommitedQty,
                 (l.QtyOnHand - l.QtyCommitSales) as AvailableQty,
+                FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) as AvailableBags,
+                bp.PackSize,
                 l.ItemKey,
                 l.LocationKey,
                 -- Add bin priority as a field so it can be used in ORDER BY with DISTINCT
@@ -1291,6 +1315,7 @@ impl Database {
                 AND (l.QtyOnHand - l.QtyCommitSales) > 0
                 AND (l.DateExpiry IS NULL OR l.DateExpiry >= GETDATE())    -- CRITICAL: Exclude expired lots completely
                 AND (l.QtyOnHand - l.QtyCommitSales) >= bp.PackSize  -- Pack size validation (consistent with lot search)
+                AND FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) >= 1  -- Must have at least 1 available bag
                 AND l.BinNo NOT LIKE '%Variance'            -- Exclude variance bins from bulk operations
                 AND l.BinNo NOT LIKE 'PWBB-%'               -- Exclude PWBB staging/replenishment areas
                 AND l.BinNo NOT LIKE 'PWBA-%'               -- Exclude PWBA staging/replenishment areas  
@@ -1353,6 +1378,8 @@ impl Database {
         let qty_issue: f64 = row.get("QtyIssued").unwrap_or(0.0);
         let committed_qty: f64 = row.get("CommitedQty").unwrap_or(0.0);
         let available_qty: f64 = row.get("AvailableQty").unwrap_or(0.0);
+        let available_bags: i32 = row.get::<f64, _>("AvailableBags").unwrap_or(0.0) as i32;
+        let pack_size: f64 = row.get("PackSize").unwrap_or(1.0);
         let item_key: &str = row.get("ItemKey").unwrap_or("");
         let location_key: &str = row.get("LocationKey").unwrap_or("");
 
@@ -1367,6 +1394,8 @@ impl Database {
             qty_issue: BigDecimal::from_f64(qty_issue).unwrap_or_default(),
             committed_qty: BigDecimal::from_f64(committed_qty).unwrap_or_default(),
             available_qty: BigDecimal::from_f64(available_qty).unwrap_or_default(),
+            available_bags,
+            pack_size: BigDecimal::from_f64(pack_size).unwrap_or_default(),
             item_key: item_key.to_string(),
             location_key: location_key.to_string(),
         })
@@ -1444,7 +1473,7 @@ impl Database {
                      AND picked.LineId = bp.LineId
             WHERE bp.RunNo = @P1
               AND bp.ItemKey = @P2
-            ORDER BY bp.RowNum
+            ORDER BY bp.BatchNo
         "#;
 
         let mut select = TiberiusQuery::new(query);
@@ -2780,7 +2809,7 @@ impl Database {
                     ELSE 0 
                 END as IsCompleted,
                 im.Description,
-                ROW_NUMBER() OVER (ORDER BY bp.RowNum) as PalletNumber
+                ROW_NUMBER() OVER (ORDER BY bp.BatchNo) as PalletNumber
             FROM cust_BulkPicked bp
             INNER JOIN INMAST im ON bp.ItemKey = im.ItemKey
             WHERE bp.RunNo = @P1 
@@ -2788,7 +2817,7 @@ impl Database {
               AND bp.RowNum != @P3
               AND bp.ToPickedBulkQty > 0
               AND ISNULL(bp.PickedBulkQty, 0) < bp.ToPickedBulkQty  -- Only unpicked pallets
-            ORDER BY bp.RowNum ASC  -- Get next pallet in sequence
+            ORDER BY bp.BatchNo ASC  -- Get next pallet in sequence
         "#;
         
         let mut query = TiberiusQuery::new(next_pallet_query);
@@ -3459,7 +3488,7 @@ impl Database {
             FROM Cust_BulkLotPicked blp
             INNER JOIN cust_BulkPicked bp ON bp.RunNo = blp.RunNo AND bp.RowNum = blp.RowNum AND bp.LineId = blp.LineId
             WHERE blp.RunNo = @P1
-            ORDER BY bp.ItemKey ASC, bp.RowNum ASC, blp.RecDate ASC, blp.LotTranNo ASC
+            ORDER BY bp.ItemKey ASC, bp.BatchNo ASC, blp.RecDate ASC, blp.LotTranNo ASC
         "#;
 
         info!("🔍 DEBUG: Executing all picked lots query for run: {} (ALL ingredients)", run_no);
@@ -3656,11 +3685,12 @@ impl Database {
         }
 
         // Step 1b: Get actual issued quantities from LotTransaction for rollback calculations
-        // Use direct LotTransaction query with batch number matching
+        // Use direct LotTransaction query with batch number matching - collect LotTranNo values for cleanup
         let get_issued_quantities_query = if let Some(lot) = specific_lot {
             format!(r#"
                 SELECT lt.LotNo, lt.ItemKey, lt.BinNo,
-                       SUM(lt.QtyIssued) as ActualIssued
+                       SUM(lt.QtyIssued) as ActualIssued,
+                       STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
                 FROM LotTransaction lt
                 WHERE EXISTS (
                     SELECT 1 FROM Cust_BulkLotPicked blp 
@@ -3673,7 +3703,8 @@ impl Database {
             // For batch unpick, get ALL actual issued quantities for this ingredient (LineId) across all batches (RowNums)
             format!(r#"
                 SELECT lt.LotNo, lt.ItemKey, lt.BinNo,
-                       SUM(lt.QtyIssued) as ActualIssued
+                       SUM(lt.QtyIssued) as ActualIssued,
+                       STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
                 FROM LotTransaction lt
                 WHERE EXISTS (
                     SELECT 1 FROM Cust_BulkLotPicked blp 
@@ -3692,8 +3723,9 @@ impl Database {
 
         let mut total_qty_to_rollback = 0.0;
         let mut lot_rollbacks = Vec::new();
+        let mut all_lot_tran_nos = Vec::new();
 
-        // Process LotTransaction records if found (for QtyCommitSales rollback)
+        // Process LotTransaction records if found (for QtyCommitSales rollback and cleanup)
         // Note: It's possible no LotTransaction records are found if they were created differently
         // but the unpick should still proceed with allocation record deletion
         for row in rows {
@@ -3701,12 +3733,23 @@ impl Database {
             let item_key: &str = row.get("ItemKey").unwrap_or("");
             let bin_no: &str = row.get("BinNo").unwrap_or("");
             let actual_issued: f64 = row.get("ActualIssued").unwrap_or(0.0);
+            let lot_tran_nos_str: &str = row.get("LotTranNos").unwrap_or("");
+            
+            // Parse comma-separated LotTranNo values
+            if !lot_tran_nos_str.is_empty() {
+                for lot_tran_no_str in lot_tran_nos_str.split(',') {
+                    if let Ok(lot_tran_no) = lot_tran_no_str.trim().parse::<i64>() {
+                        all_lot_tran_nos.push(lot_tran_no);
+                    }
+                }
+            }
             
             total_qty_to_rollback += actual_issued;
             lot_rollbacks.push((lot_no.to_string(), item_key.to_string(), bin_no.to_string(), actual_issued));
         }
 
-        info!("✅ Found {} LotTransaction records for rollback calculations (total qty: {})", lot_rollbacks.len(), total_qty_to_rollback);
+        info!("✅ Found {} LotTransaction records for rollback calculations (total qty: {}, LotTranNos: {})", 
+              lot_rollbacks.len(), total_qty_to_rollback, all_lot_tran_nos.len());
 
         // Step 2: Delete allocation records (official app pattern)
         let delete_allocations_query = if let Some(lot) = specific_lot {
@@ -3798,41 +3841,29 @@ impl Database {
         info!("✅ Reset picked quantities in cust_BulkPicked");
 
         // Step 6: Delete corresponding LotTransaction records for complete audit trail cleanup
-        // This is the CRITICAL MISSING STEP that was causing audit inconsistencies
-        let delete_lot_transaction_query = if let Some(lot) = specific_lot {
-            // For specific lot unpick, delete only LotTransaction records for this specific lot
-            format!(r#"
+        // Use the collected LotTranNo values directly to avoid the EXISTS subquery problem
+        // (Previously failed because Cust_BulkLotPicked records were already deleted in Step 2)
+        if !all_lot_tran_nos.is_empty() {
+            let lot_tran_nos_str = all_lot_tran_nos.iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<String>>()
+                .join(",");
+                
+            let delete_lot_transaction_query = format!(r#"
                 DELETE FROM LotTransaction
                 WHERE TransactionType = 5
-                  AND EXISTS (
-                      SELECT 1 FROM Cust_BulkLotPicked blp 
-                      WHERE blp.BatchNo = LotTransaction.IssueDocNo 
-                        AND blp.RunNo = {} 
-                        AND blp.RowNum = {} 
-                        AND blp.LineId = {}
-                        AND blp.LotNo = '{}'
-                  )
-                  AND LotNo = '{}'
-            "#, run_no, row_num, line_id, lot, lot)
-        } else {
-            // For batch unpick, delete ALL LotTransaction records for this ingredient (LineId) across all batches
-            format!(r#"
-                DELETE FROM LotTransaction
-                WHERE TransactionType = 5
-                  AND EXISTS (
-                      SELECT 1 FROM Cust_BulkLotPicked blp 
-                      WHERE blp.BatchNo = LotTransaction.IssueDocNo 
-                        AND blp.RunNo = {} 
-                        AND blp.LineId = {}
-                  )
-            "#, run_no, line_id)
-        };
+                  AND User5 = 'Picking Customization'
+                  AND LotTranNo IN ({})
+            "#, lot_tran_nos_str);
 
-        // Execute the DELETE operation to clean up LotTransaction audit records
-        client.simple_query(&delete_lot_transaction_query).await
-            .context("Failed to delete LotTransaction audit records")?;
-            
-        info!("✅ Deleted LotTransaction audit records - audit trail now consistent");
+            // Execute the DELETE operation to clean up LotTransaction audit records
+            client.simple_query(&delete_lot_transaction_query).await
+                .context("Failed to delete LotTransaction audit records")?;
+                
+            info!("✅ Deleted {} LotTransaction records using direct LotTranNo list", all_lot_tran_nos.len());
+        } else {
+            info!("⚠️ No LotTransaction records found to delete (this is normal if records were created differently)");
+        }
 
         // Return summary
         Ok(serde_json::json!({
@@ -3860,11 +3891,11 @@ impl Database {
 
         // Get all ingredients with picked lots in this run
         let query = r#"
-            SELECT DISTINCT bp.RowNum, bp.LineId, bp.ItemKey
+            SELECT DISTINCT bp.RowNum, bp.LineId, bp.ItemKey, bp.BatchNo
             FROM cust_BulkPicked bp
             INNER JOIN Cust_BulkLotPicked blp ON bp.RunNo = blp.RunNo AND bp.RowNum = blp.RowNum AND bp.LineId = blp.LineId
             WHERE bp.RunNo = @P1
-            ORDER BY bp.ItemKey ASC, bp.RowNum ASC
+            ORDER BY bp.ItemKey ASC, bp.BatchNo ASC
         "#;
 
         info!("🔍 Finding all ingredients with picked lots for run: {}", run_no);
@@ -4015,9 +4046,10 @@ impl Database {
         info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, Qty: {}", 
               run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty);
 
-        // Step 2: Get corresponding LotTransaction record for actual issued quantity
+        // Step 2: Get corresponding LotTransaction record for actual issued quantity AND collect LotTranNo values
         let get_transaction_query = r#"
-            SELECT SUM(lt.QtyIssued) as ActualIssued
+            SELECT SUM(lt.QtyIssued) as ActualIssued,
+                   STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
             FROM LotTransaction lt
             WHERE lt.LotNo = @P1 AND lt.ItemKey = @P2 AND lt.BinNo = @P3 
               AND lt.IssueDocNo = @P4 AND lt.TransactionType = 5 
@@ -4036,13 +4068,15 @@ impl Database {
         let rows: Vec<Row> = stream.into_first_result().await
             .context("Failed to process transaction record")?;
 
-        let actual_issued = if let Some(row) = rows.first() {
-            row.get("ActualIssued").unwrap_or(0.0)
+        let (actual_issued, lot_tran_nos_str) = if let Some(row) = rows.first() {
+            let actual_issued = row.get("ActualIssued").unwrap_or(0.0);
+            let lot_tran_nos_str = row.get("LotTranNos").unwrap_or("").to_string();
+            (actual_issued, lot_tran_nos_str)
         } else {
-            0.0
+            (0.0, String::new())
         };
 
-        info!("✅ Found actual issued quantity: {} for lot: {}, bin: {}", actual_issued, lot_no, bin_no);
+        info!("✅ Found actual issued quantity: {} for lot: {}, bin: {}, LotTranNos: {}", actual_issued, lot_no, bin_no, lot_tran_nos_str);
 
         // Step 3: Delete the specific allocation record using LotTranNo
         let delete_allocation_query = r#"
@@ -4151,23 +4185,24 @@ impl Database {
             .context("Failed to update picked quantities")?;
         info!("✅ Updated picked quantities in cust_BulkPicked (subtracted {} bags)", qty_in_bags);
 
-        // Step 7: Delete corresponding LotTransaction records for complete audit trail cleanup
-        // This is the CRITICAL MISSING STEP that was causing audit inconsistencies in View Picked Lots modal
-        let delete_lot_transaction_query = format!(r#"
-            DELETE FROM LotTransaction
-            WHERE TransactionType = 5
-              AND LotNo = '{}'
-              AND ItemKey = '{}'
-              AND BinNo = '{}'
-              AND IssueDocNo = '{}'
-              AND User5 = 'Picking Customization'
-        "#, lot_no, item_key, bin_no, batch_no);
+        // Step 7: Delete corresponding LotTransaction records using direct LotTranNo approach (SAFE & CONSISTENT)
+        // This ensures consistency with the "Delete All" batch operation approach
+        if !lot_tran_nos_str.is_empty() {
+            let delete_lot_transaction_query = format!(r#"
+                DELETE FROM LotTransaction
+                WHERE TransactionType = 5
+                  AND User5 = 'Picking Customization'
+                  AND LotTranNo IN ({})
+            "#, lot_tran_nos_str);
 
-        // Execute the DELETE operation to clean up LotTransaction audit records
-        client.simple_query(&delete_lot_transaction_query).await
-            .context("Failed to delete LotTransaction audit records in precise unpick")?;
-            
-        info!("✅ Deleted LotTransaction audit records for precise unpick - audit trail now consistent for lot: {}", lot_no);
+            // Execute the DELETE operation to clean up LotTransaction audit records
+            client.simple_query(&delete_lot_transaction_query).await
+                .context("Failed to delete LotTransaction audit records in precise unpick")?;
+                
+            info!("✅ Deleted LotTransaction audit records using direct LotTranNo approach for precise unpick - lot: {}", lot_no);
+        } else {
+            info!("⚠️ No LotTransaction records found to delete for precise unpick - lot: {}", lot_no);
+        }
 
         // Return summary
         Ok(serde_json::json!({

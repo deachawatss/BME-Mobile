@@ -1143,6 +1143,7 @@ interface ProductionRun {
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyOnHand</th>
                         <th class="coffee-header tw-min-w-[80px] tw-text-xs md:tw-text-sm">QtyIssue</th>
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">CommitedQty</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">Available Bags</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1155,6 +1156,7 @@ interface ProductionRun {
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.qty_on_hand | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.qty_issue | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.committed_qty | number:'1.2-2' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm tw-font-bold tw-text-green-700">{{ lot.available_bags }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -2671,11 +2673,11 @@ export class BulkPickingComponent implements AfterViewInit {
     
     console.log(`🔍 getCurrentBatchData: Looking for pallet with RowNum ${currentRowNum} from ${pallets.length} pallets`);
     
-    // Sort pallets by row_num ascending to ensure sequential processing (832446→832447→832448...)
+    // Sort pallets by batch_number ascending to ensure sequential processing (850828→850829→850830...)
     const sortedPallets = [...pallets].sort((a: any, b: any) => {
-      const aRowNum = parseInt(a.row_num?.toString() || '0');
-      const bRowNum = parseInt(b.row_num?.toString() || '0');
-      return aRowNum - bRowNum; // Ascending order for sequential processing
+      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
+      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
+      return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
     });
     
     // CRITICAL FIX: Find the pallet that matches current form coordinates (RowNum)
@@ -2811,11 +2813,11 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
     
-    // Sort pallets by row_num ascending and find first one with remaining bags > 0
+    // Sort pallets by batch_number ascending and find first one with remaining bags > 0
     const sortedPallets = [...pallets].sort((a: any, b: any) => {
-      const aRowNum = parseInt(a.row_num?.toString() || '0');
-      const bRowNum = parseInt(b.row_num?.toString() || '0');
-      return aRowNum - bRowNum; // Ascending order for sequential processing
+      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
+      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
+      return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
     });
     
     // Find the first pallet with remaining bags > 0
@@ -3419,15 +3421,15 @@ export class BulkPickingComponent implements AfterViewInit {
     const currentItemKey = currentFormData.current_ingredient.ingredient.item_key;
     
     // CRITICAL FIX: Use the same sequential selection logic as getCurrentBatchData()
-    // Sort pallets by row_num ascending to ensure sequential processing (832446→832447→832448...)
+    // Sort pallets by batch_number ascending to ensure sequential processing (850828→850829→850830...)
     const sortedPallets = [...pallets].sort((a: any, b: any) => {
-      const aRowNum = parseInt(a.row_num?.toString() || '0');
-      const bRowNum = parseInt(b.row_num?.toString() || '0');
-      return aRowNum - bRowNum; // Ascending order for sequential processing
+      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
+      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
+      return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
     });
     
-    // CRITICAL FIX: Always use the first pallet in sequential order (lowest row_num)
-    // This ensures we check the correct pallet (832446 first, then 832447, etc.)
+    // CRITICAL FIX: Always use the first pallet in sequential order (lowest batch_number)
+    // This ensures we check the correct pallet (850828 first, then 850829, etc.)
     const currentPallet = sortedPallets[0]; // Always use first in sequence
     
     if (!currentPallet) {

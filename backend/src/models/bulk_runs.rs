@@ -182,6 +182,8 @@ pub struct LotSearchResult {
     pub qty_issue: BigDecimal,
     pub committed_qty: BigDecimal,
     pub available_qty: BigDecimal,  // calculated field: qty_on_hand - committed_qty
+    pub available_bags: i32,        // calculated field: FLOOR(available_qty / pack_size)
+    pub pack_size: BigDecimal,      // pack size for bag calculation
     pub item_key: String,
     pub location_key: String,
 }

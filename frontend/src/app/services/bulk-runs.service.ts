@@ -203,6 +203,8 @@ export interface LotSearchResult {
   qty_issue: number;
   committed_qty: number;
   available_qty: number;  // calculated field
+  available_bags: number; // NEW: calculated field for available bags
+  pack_size: number;      // NEW: pack size for bag calculation
   item_key: string;
   location_key: string;
 }
