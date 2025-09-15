@@ -4454,7 +4454,7 @@ impl Database {
             .context("Failed to get database client")?;
 
         let query = r#"
-            SELECT 
+            SELECT
                 blp.RunNo,
                 blp.BatchNo,
                 blp.LineId,
@@ -4465,8 +4465,13 @@ impl Database {
                 blp.PackSize,
                 blp.RecUserid,
                 ISNULL(blp.ModifiedBy, '') as ModifiedBy,
-                CONVERT(varchar, blp.RecDate, 120) as RecDate
+                CONVERT(varchar, blp.RecDate, 120) as RecDate,
+                ISNULL(bp.PickedBulkQty, 0) as PickedBulkQty,
+                ISNULL(bp.PickedQty, 0) as PickedQty
             FROM Cust_BulkLotPicked blp
+            INNER JOIN cust_BulkPicked bp ON blp.RunNo = bp.RunNo
+                AND blp.BatchNo = bp.BatchNo
+                AND blp.ItemKey = bp.ItemKey
             WHERE blp.RunNo = @P1
                 AND blp.QtyReceived > 0
             ORDER BY blp.BatchNo, blp.LineId, blp.LotNo, blp.BinNo
@@ -4497,11 +4502,17 @@ impl Database {
             let rec_userid: &str = row.get("RecUserid").unwrap_or("");
             let modified_by: &str = row.get("ModifiedBy").unwrap_or("");
             let rec_date: &str = row.get("RecDate").unwrap_or("");
+            let picked_bulk_qty_f64: f64 = row.get("PickedBulkQty").unwrap_or(0.0);
+            let picked_qty_f64: f64 = row.get("PickedQty").unwrap_or(0.0);
 
             // Convert f64 to BigDecimal
             let qty_received = BigDecimal::from_f64(qty_received_f64)
                 .unwrap_or_else(|| BigDecimal::from(0));
             let pack_size = BigDecimal::from_f64(pack_size_f64)
+                .unwrap_or_else(|| BigDecimal::from(0));
+            let picked_bulk_qty = BigDecimal::from_f64(picked_bulk_qty_f64)
+                .unwrap_or_else(|| BigDecimal::from(0));
+            let picked_qty = BigDecimal::from_f64(picked_qty_f64)
                 .unwrap_or_else(|| BigDecimal::from(0));
 
             let lot_detail = LotPickingDetail {
@@ -4516,6 +4527,8 @@ impl Database {
                 rec_userid: rec_userid.to_string(),
                 modified_by: modified_by.to_string(),
                 rec_date: rec_date.to_string(),
+                picked_bulk_qty,
+                picked_qty,
             };
 
             lot_details.push(lot_detail);

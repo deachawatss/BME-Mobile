@@ -386,4 +386,6 @@ pub struct LotPickingDetail {
     pub rec_userid: String,
     pub modified_by: String,
     pub rec_date: String,
+    pub picked_bulk_qty: BigDecimal,
+    pub picked_qty: BigDecimal,
 }

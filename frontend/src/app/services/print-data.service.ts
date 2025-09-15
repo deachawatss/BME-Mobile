@@ -37,6 +37,8 @@ export interface LotPickingDetail {
   rec_userid: string;
   modified_by: string;
   rec_date: string;
+  picked_bulk_qty: number;
+  picked_qty: number;
 }
 
 export interface PrintLabelData {
@@ -88,7 +90,7 @@ export class PrintDataService {
    * Get lot picking details for a specific run
    */
   getLotPickingDetails(runNo: number): Observable<LotPickingDetail[]> {
-    return this.http.get<ApiResponse<LotPickingDetail[]>>(`${this.apiUrl}/runs/${runNo}/lot-details`)
+    return this.http.get<ApiResponse<LotPickingDetail[]>>(`${this.apiUrl}/bulk-runs/${runNo}/lot-details`)
       .pipe(map(response => response.data ?? []));
   }
 
@@ -415,37 +417,35 @@ export class PrintDataService {
     const currentUser = this.authService.getCurrentUser();
     const pickedByUser = currentUser?.username || this.getMostRecentUserForBatch(batchNo, items) || 'SYSTEM';
     
-    // Create enhanced items with lot details and fallback data
-    const enhancedItems = items.map(item => {
-      // Find matching lot detail for this item and batch
-      const lotDetail = lotDetails.find(lot => 
-        lot.batch_no === batchNo && 
-        lot.item_key === item.item_key
-      );
-      
-      // Use lot details from API, fallback to item data, or use suggested lot from run data
-      const lotNo = lotDetail?.lot_no || item.lot_no || runData.suggested_lot || '';
-      const binNo = lotDetail?.bin_no || item.bin_no || runData.suggested_bin || '';
-      
-      // Debug logging for lot/bin resolution
-      console.log(`🔍 LOT DEBUG - Item: ${item.item_key}, Batch: ${batchNo}`, {
-        lotDetail: lotDetail,
-        itemLotNo: item.lot_no,
-        itemBinNo: item.bin_no,
-        runSuggestedLot: runData.suggested_lot,
-        runSuggestedBin: runData.suggested_bin,
-        finalLotNo: lotNo,
-        finalBinNo: binNo
+    // Create print items directly from lot details (one line per lot/bin combination)
+    const batchLotDetails = lotDetails.filter(lot => lot.batch_no === batchNo);
+
+    const enhancedItems = batchLotDetails.map(lotDetail => {
+      // Find corresponding item data for unit and pack size
+      const item = items.find(i => i.item_key === lotDetail.item_key);
+
+      // Calculate bag count from quantity/pack size for each lot
+      const bags = lotDetail.qty_received && lotDetail.pack_size > 0
+        ? Math.ceil(lotDetail.qty_received / lotDetail.pack_size)
+        : Math.ceil(this.parseQuantity(lotDetail.picked_bulk_qty));
+
+      // Debug logging for data resolution
+      console.log(`🔍 PRINT DEBUG - Item: ${lotDetail.item_key}, Lot: ${lotDetail.lot_no}, Batch: ${batchNo}`, {
+        qtyReceived: lotDetail.qty_received,
+        packSize: lotDetail.pack_size,
+        calculatedBags: bags,
+        pickedBulkQty: lotDetail.picked_bulk_qty,
+        binNo: lotDetail.bin_no
       });
-      
+
       return {
-        itemNo: item.item_key,
-        lotNo: lotNo,
-        binNo: binNo,
-        bagQuantity: this.parseQuantity(item.picked_bulk_qty),
-        totalQuantity: this.parseQuantity(item.picked_qty),
-        unit: item.unit || 'KG',
-        packSize: this.parseQuantity(item.pack_size),
+        itemNo: lotDetail.item_key,
+        lotNo: lotDetail.lot_no,
+        binNo: lotDetail.bin_no,
+        bagQuantity: bags,
+        totalQuantity: this.parseQuantity(lotDetail.qty_received),
+        unit: item?.unit || 'KG',
+        packSize: this.parseQuantity(lotDetail.pack_size),
         checkbox: false
       };
     });
