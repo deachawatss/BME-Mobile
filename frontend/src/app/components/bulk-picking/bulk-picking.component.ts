@@ -79,8 +79,9 @@ interface ProductionRun {
     }
     
     .data-cell-completed {
-      background-color: #e8f5e8 !important; /* Soft green background - positive completion */
-      color: #2e7d32 !important; /* Dark green text - excellent readability */
+      background-color: #e8f5e8 !important; /* Light green background - soft completion indicator */
+      color: #1b5e20 !important; /* Dark green text - enhanced readability */
+      font-weight: 900 !important; /* Extra bold text - maximum visibility on touchscreens */
     }
 
     .coffee-table {
