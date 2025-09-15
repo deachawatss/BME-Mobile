@@ -2827,7 +2827,7 @@ export class BulkPickingComponent implements AfterViewInit {
     }
     
     if (!lotNumber || lotNumber.trim() === '') {
-      this.errorMessage.set('Please select a lot number first');
+      this.errorMessage.set('Please select a lot number using the lot search button or enter manually');
       return;
     }
     
@@ -2835,7 +2835,17 @@ export class BulkPickingComponent implements AfterViewInit {
       this.errorMessage.set('Please select a bin number first');
       return;
     }
-    
+
+    if (!runNumber || runNumber.trim() === '') {
+      this.errorMessage.set('Please select a run number first');
+      return;
+    }
+
+    if (!itemKey || itemKey.trim() === '') {
+      this.errorMessage.set('Please select an ingredient first');
+      return;
+    }
+
     // Extract row_num and line_id from current ingredient data
     const currentData = this.currentFormData();
     if (!currentData?.current_ingredient?.ingredient) {
@@ -2884,20 +2894,15 @@ export class BulkPickingComponent implements AfterViewInit {
     // DEFENSIVE LOGGING: Log coordinates being sent to backend for debugging
     console.log(`🎯 PICK CONFIRMATION: Using FIRST AVAILABLE coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
     
-    // Call pick confirmation API
-    if (runNumber && itemKey) {
-      this.confirmPickWithBackend({
-        runNo: runNumber,
-        rowNum: rowNum,
-        lineId: lineId,
-        pickedBulkQty: pendingBags,
-        lotNo: lotNumber,
-        binNo: binNumber
-      });
-    } else {
-      // Fallback for demo mode
-      this.handlePickConfirmationSuccess(pendingBags, lotNumber, binNumber);
-    }
+    // Call pick confirmation API - runNumber and itemKey are already validated above
+    this.confirmPickWithBackend({
+      runNo: runNumber,
+      rowNum: rowNum,
+      lineId: lineId,
+      pickedBulkQty: pendingBags,
+      lotNo: lotNumber,
+      binNo: binNumber
+    });
   }
   
   // Call backend API for pick confirmation
@@ -4131,14 +4136,12 @@ export class BulkPickingComponent implements AfterViewInit {
     if (this.isCurrentIngredientCompleted()) {
       return false;
     }
-    
+
     const pendingBags = this.productionForm.get('pendingPickBags')?.value || 0;
-    const lotNumber = this.productionForm.get('lotNumber')?.value;
-    const binNumber = this.productionForm.get('binNumber')?.value || this.productionForm.get('binNo')?.value;
-    
-    return pendingBags > 0 && 
-           lotNumber && lotNumber.trim() !== '' && 
-           binNumber && binNumber.trim() !== '';
+
+    // Only check for quantity selection - allow users to click confirm even without lot/bin
+    // The confirmPickOperation() function will show proper error messages for missing lot/bin
+    return pendingBags > 0;
   }
   
   // Deprecated method - kept for backward compatibility
