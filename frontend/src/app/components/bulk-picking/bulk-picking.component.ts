@@ -244,6 +244,8 @@ interface ProductionRun {
                         formControlName="runNumber"
                         class="nwfth-input tw-w-full tw-pr-10 tw-px-3 tw-py-2 tw-text-sm tw-font-mono"
                         placeholder="Enter run number"
+                        (click)="onRunFieldClick()"
+                        (blur)="onRunFieldBlur()"
                         (keydown.enter)="searchRun()"
                         autocomplete="off">
                       <button
@@ -1607,6 +1609,10 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Current form data from API
   currentFormData = signal<BulkRunFormData | null>(null);
+
+  // Run field interaction state for click-to-clear functionality
+  private previousRunValue: string = '';
+  private runFieldClicked: boolean = false;
   searchResults = signal<BulkRunSearchResponse[]>([]);
   errorMessage = signal<string | null>(null);
   
@@ -1777,6 +1783,22 @@ export class BulkPickingComponent implements AfterViewInit {
   getCurrentDate(): string {
     // Story 1.3 T1.3.4: Use Bangkok timezone for date display
     return this.bangkokTimezone.getCurrentDateString();
+  }
+
+  // Run field interaction methods for click-to-clear functionality
+  onRunFieldClick(): void {
+    this.previousRunValue = this.productionForm.get('runNumber')?.value || '';
+    this.runFieldClicked = true;
+    this.productionForm.get('runNumber')?.setValue('');
+  }
+
+  onRunFieldBlur(): void {
+    const currentValue = this.productionForm.get('runNumber')?.value?.trim();
+    if (this.runFieldClicked && !currentValue) {
+      this.productionForm.get('runNumber')?.setValue(this.previousRunValue);
+    }
+    this.runFieldClicked = false;
+    this.previousRunValue = '';
   }
 
   // Search functions
