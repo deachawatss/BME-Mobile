@@ -45,14 +45,6 @@ impl std::fmt::Debug for AppState {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct DatabaseConfig {
-    pub server: String,
-    pub database: String,
-    pub username: String,
-    pub password: String,
-    pub port: u16,
-}
 
 #[derive(Clone, Debug)]
 pub struct LdapConfig {
@@ -88,6 +80,16 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+#[derive(Serialize)]
+pub struct DatabaseStatusResponse {
+    pub success: bool,
+    pub primary_database: String,
+    pub replica_database: Option<String>,
+    pub available_databases: Vec<String>,
+    pub has_replica: bool,
+    pub timestamp: String,
+}
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Health check endpoint
@@ -98,6 +100,18 @@ async fn health_check() -> Json<HealthResponse> {
         message: "Bulk picking backend is running".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: VERSION.to_string(),
+    })
+}
+
+/// Database status endpoint - shows current PRIMARY_DB and REPLICA_DB configuration
+async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatusResponse> {
+    Json(DatabaseStatusResponse {
+        success: true,
+        primary_database: state.database.get_primary_database_name().to_string(),
+        replica_database: state.database.get_replica_database_name().map(|s| s.to_string()),
+        available_databases: state.database.get_available_databases().iter().map(|s| s.to_string()).collect(),
+        has_replica: state.database.has_replica(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
 
@@ -527,21 +541,7 @@ async fn main() {
     info!("Server configured to run on {}:{}", host, port);
     info!("CORS origins: {}", cors_origins);
 
-    // Database configuration - using TFCPILOT3 as primary for bulk picking operations
-    let db_config = DatabaseConfig {
-        server: std::env::var("TFCPILOT3_SERVER").unwrap_or_else(|_| "192.168.0.86".to_string()),
-        database: std::env::var("TFCPILOT3_DATABASE").unwrap_or_else(|_| "TFCPILOT3".to_string()),
-        username: std::env::var("TFCPILOT3_USERNAME").unwrap_or_else(|_| std::env::var("DB_USERNAME").unwrap_or_else(|_| "NSW".to_string())),
-        password: std::env::var("TFCPILOT3_PASSWORD").unwrap_or_else(|_| std::env::var("DB_PASSWORD").unwrap_or_else(|_| "B3sp0k3".to_string())),
-        port: std::env::var("TFCPILOT3_PORT").unwrap_or_else(|_| std::env::var("DB_PORT").unwrap_or_else(|_| "49381".to_string()))
-            .parse()
-            .unwrap_or(49381),
-    };
-
-    info!(
-        "Database configured: {}:{} - {}",
-        db_config.server, db_config.port, db_config.database
-    );
+    // Database configuration now handled by Database::new() using PRIMARY_DB/REPLICA_DB environment variables
 
     // LDAP configuration
     let ldap_config = LdapConfig {
@@ -589,6 +589,7 @@ async fn main() {
     let app = Router::new()
         // API routes
         .route("/api/health", get(health_check))
+        .route("/api/database/status", get(database_status))
         .route("/api/auth/login", post(login))
         .route("/api/auth/status", get(auth_status))
         .with_state(state.clone())
