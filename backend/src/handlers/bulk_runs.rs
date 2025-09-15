@@ -310,6 +310,42 @@ pub async fn check_run_completion(
     }
 }
 
+/// Get bulk run status
+#[instrument(skip(database))]
+pub async fn get_run_status(
+    Path(run_no): Path<i32>,
+    State(database): State<Database>,
+) -> Result<Json<ApiResponse<BulkRunStatusResponse>>, StatusCode> {
+    info!("Run status endpoint called for: {}", run_no);
+
+    match database.get_bulk_run_status(run_no).await {
+        Ok(Some(status_response)) => {
+            info!("Run status found: {} - {}", run_no, status_response.status);
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(status_response),
+                message: format!("Run {} status retrieved", run_no),
+            }))
+        }
+        Ok(None) => {
+            warn!("Run status not found: {}", run_no);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Run {} not found", run_no),
+            }))
+        }
+        Err(e) => {
+            error!("Failed to get run status {}: {}", run_no, e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: "Failed to retrieve run status".to_string(),
+            }))
+        }
+    }
+}
+
 /// Search for items in a bulk run
 #[instrument(skip(database))]
 pub async fn search_run_items(
@@ -1167,6 +1203,115 @@ pub async fn get_run_lot_details(
                 success: false,
                 data: None,
                 message: format!("Failed to get lot picking details: {}", e),
+            }))
+        }
+    }
+}
+
+/// **REVERT STATUS ENDPOINT** - Revert bulk run status from PRINT back to NEW
+/// Used when user wants to make changes after run completion
+#[instrument(skip(database))]
+pub async fn revert_run_status(
+    State(database): State<Database>,
+    Path(run_no): Path<i32>,
+    headers: HeaderMap,
+) -> Result<Json<ApiResponse<BulkRunStatusResponse>>, StatusCode> {
+    info!("🔄 REVERT: Status revert endpoint called for run: {}", run_no);
+
+    // Extract user information from headers
+    let user_id = headers.get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("SYSTEM");
+
+    info!("👤 REVERT: User requesting status revert for run {}: {}", run_no, user_id);
+
+    // Validate that user_id is not empty or just whitespace
+    let user_id = user_id.trim();
+    if user_id.is_empty() || user_id == "SYSTEM" {
+        warn!("⚠️ REVERT: Invalid or missing user ID for run {} revert", run_no);
+        return Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            message: "Valid user authentication required for status revert operation".to_string(),
+        }));
+    }
+
+    // Validate that the run exists and is in PRINT status first
+    match database.get_bulk_run_status(run_no).await {
+        Ok(Some(current_status)) => {
+            if current_status.status != "PRINT" {
+                warn!("⚠️ REVERT: Cannot revert run {} - current status is '{}', expected 'PRINT'", run_no, current_status.status);
+                return Ok(Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    message: format!("Cannot revert run {} - current status is '{}', expected 'PRINT'", run_no, current_status.status),
+                }));
+            }
+        }
+        Ok(None) => {
+            warn!("⚠️ REVERT: Cannot revert run {} - run not found", run_no);
+            return Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Cannot revert run {} - run not found", run_no),
+            }));
+        }
+        Err(e) => {
+            error!("❌ REVERT: Database error checking run status for {}: {}", run_no, e);
+            return Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Database error checking run status: {}", e),
+            }));
+        }
+    }
+
+    // Perform the revert operation directly through database layer
+    match database.revert_run_status_to_new(run_no, user_id).await {
+        Ok(true) => {
+            info!("✅ REVERT: Successfully reverted run {} status to NEW", run_no);
+
+            // Get the updated status to return to client
+            match database.get_bulk_run_status(run_no).await {
+                Ok(Some(updated_status)) => {
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: Some(updated_status),
+                        message: format!("Run {} status successfully reverted from PRINT to NEW", run_no),
+                    }))
+                }
+                Ok(None) => {
+                    warn!("⚠️ REVERT: Status reverted but run {} not found in status check", run_no);
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: None,
+                        message: "Status reverted successfully, but run status not found".to_string(),
+                    }))
+                }
+                Err(e) => {
+                    error!("❌ REVERT: Failed to get updated status after revert for run {}: {}", run_no, e);
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: None,
+                        message: format!("Status reverted successfully, but failed to retrieve updated status: {}", e),
+                    }))
+                }
+            }
+        }
+        Ok(false) => {
+            warn!("⚠️ REVERT: Failed to revert run {} - run may not exist or not in PRINT status", run_no);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Cannot revert run {} - run may not exist or is not in PRINT status", run_no),
+            }))
+        }
+        Err(e) => {
+            error!("❌ REVERT: Database error during status revert for run {}: {}", run_no, e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Database error during status revert: {}", e),
             }))
         }
     }

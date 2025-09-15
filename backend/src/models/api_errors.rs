@@ -74,15 +74,3 @@ impl IntoResponse for ApiErrorResponse {
     }
 }
 
-/// Helper function to create standardized success responses
-#[derive(Debug, Serialize)]
-pub struct ApiSuccessResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub message: String,
-    pub timestamp: String,
-    pub request_id: Option<String>,
-}
-
-impl<T> ApiSuccessResponse<T> {
-}

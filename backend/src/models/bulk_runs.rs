@@ -49,6 +49,15 @@ pub struct BulkRunSearchResponse {
     pub completed_ingredients: i32,
 }
 
+/// API response model for bulk run status
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BulkRunStatusResponse {
+    pub run_no: i32,
+    pub status: String,
+    pub formula_desc: String,
+    pub last_modified: Option<DateTime<Utc>>,
+}
+
 /// API request model for bulk run search
 #[derive(Debug, Deserialize)]
 pub struct BulkRunSearchQuery {

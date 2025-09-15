@@ -300,13 +300,20 @@ export interface BatchWeightSummaryResponse {
   total_remaining_weight: number;   // Sum of all remaining weights
 }
 
+export interface BulkRunStatusResponse {
+  run_no: number;
+  status: string;
+  formula_desc: string;
+  last_modified?: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class BulkRunsService {
   private http = inject(HttpClient);
   private authService = inject(AuthService);
-  private readonly baseUrl = `${environment.apiUrl}/runs`;
+  private readonly baseUrl = `${environment.apiUrl}/bulk-runs`;
   
   /**
    * Get HTTP headers with authentication for API requests
@@ -515,6 +522,25 @@ export class BulkRunsService {
           // Check if it's an HTTP error or our custom error
           const errorMsg = error.message || error.error?.message || `Failed to get form data for run ${runNo}`;
           this.errorMessage.set(errorMsg);
+          return throwError(() => new Error(errorMsg));
+        })
+      );
+  }
+
+  /**
+   * Get bulk run status information
+   */
+  getBulkRunStatus(runNo: number): Observable<ApiResponse<BulkRunStatusResponse>> {
+    return this.http.get<ApiResponse<BulkRunStatusResponse>>(`${this.baseUrl}/${runNo}/status`)
+      .pipe(
+        tap((response: ApiResponse<BulkRunStatusResponse>) => {
+          if (response.success) {
+            console.log(`✅ Run ${runNo} status: ${response.data?.status}`);
+          }
+        }),
+        catchError(error => {
+          const errorMsg = error.error?.message || `Failed to get status for run ${runNo}`;
+          console.error(`❌ Status fetch error for run ${runNo}:`, errorMsg);
           return throwError(() => new Error(errorMsg));
         })
       );
@@ -1166,6 +1192,40 @@ export class BulkRunsService {
           if (!response.success) {
             throw new Error(response.message);
           }
+        })
+      );
+  }
+
+  /**
+   * **REVERT STATUS SERVICE** - Revert bulk run status from PRINT back to NEW
+   * Used when user wants to make changes after run completion
+   */
+  revertRunStatus(runNo: number): Observable<ApiResponse<BulkRunStatusResponse>> {
+    const url = `${this.baseUrl}/${runNo}/revert-status`;
+    const httpOptions = {
+      headers: this.getAuthHeaders()
+    };
+
+    console.log(`🔄 SERVICE: Requesting status revert for run ${runNo}`);
+
+    return this.http.post<ApiResponse<BulkRunStatusResponse>>(url, {}, httpOptions)
+      .pipe(
+        tap((response: ApiResponse<BulkRunStatusResponse>) => {
+          if (response.success) {
+            console.log(`✅ SERVICE: Successfully reverted run ${runNo} status to NEW`);
+            // Update the current run status signal if the response contains updated status
+            if (response.data) {
+              // Note: We don't have access to currentRunStatus signal from the component here,
+              // so the component will need to refresh the status after calling this method
+            }
+          } else {
+            console.warn(`⚠️ SERVICE: Failed to revert run ${runNo} status: ${response.message}`);
+          }
+        }),
+        catchError(error => {
+          console.error(`❌ SERVICE: Error reverting run ${runNo} status:`, error);
+          const errorMsg = error.error?.message || error.message || 'Failed to revert run status';
+          return throwError(() => new Error(errorMsg));
         })
       );
   }

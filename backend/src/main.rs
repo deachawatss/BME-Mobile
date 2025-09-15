@@ -425,6 +425,11 @@ async fn authenticate_sql(
 async fn handle_spa_or_static(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
     
+    // Don't handle API routes - return 404 to let them be handled by proper API handlers
+    if path.starts_with("api/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    
     // Check if it's a request for a static asset
     if path.starts_with("assets/") || 
        path.ends_with(".js") || 
@@ -589,7 +594,7 @@ async fn main() {
         .with_state(state.clone())
         // Bulk runs routes with Database state and JWT protection
         .nest(
-            "/api/runs",
+            "/api/bulk-runs",
             Router::new()
                 .route("/list", get(bulk_runs::list_bulk_runs))
                 .route(
@@ -604,6 +609,7 @@ async fn main() {
                     get(bulk_runs::get_next_ingredient),
                 )
                 .route("/:run_no/completion", get(bulk_runs::check_run_completion))
+                .route("/:run_no/status", get(bulk_runs::get_run_status))
                 .route("/:run_no/search-items", get(bulk_runs::search_run_items))
                 .route("/:run_no/ingredient-index", get(bulk_runs::get_ingredient_index))
                 .route("/:run_no/ingredient-by-coordinates", get(bulk_runs::get_ingredient_by_coordinates))
@@ -624,6 +630,7 @@ async fn main() {
                 .route("/:run_no/lot-details", get(bulk_runs::get_run_lot_details))
                 .route("/:run_no/:row_num/:line_id/unpick", post(bulk_runs::unpick_ingredient))
                 .route("/:run_no/unpick-all", post(bulk_runs::unpick_all_run_lots))
+                .route("/:run_no/revert-status", post(bulk_runs::revert_run_status))
                 .route("/health", get(bulk_runs::bulk_runs_health))
                 .layer(from_fn_with_state(state.clone(), jwt_auth_middleware))
                 .with_state(state.database.clone()),

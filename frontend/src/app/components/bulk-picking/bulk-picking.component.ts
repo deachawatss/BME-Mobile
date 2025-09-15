@@ -2,7 +2,7 @@ import { Component, signal, computed, effect, inject, AfterViewInit, ViewChild, 
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
-import { BulkRunsService, BulkRunFormData, BulkRunSearchResponse, InventoryStatus, InventoryAlert, BulkRunSummary, BulkRunListResponse, PaginationInfo, RunItemSearchResult, LotSearchResult, PalletBatch, PalletTrackingResponse, PickedLot, PickedLotsResponse, UnpickRequest, BatchWeightSummaryItem, BatchWeightSummaryResponse } from '../../services/bulk-runs.service';
+import { BulkRunsService, BulkRunFormData, BulkRunSearchResponse, InventoryStatus, InventoryAlert, BulkRunSummary, BulkRunListResponse, PaginationInfo, RunItemSearchResult, LotSearchResult, PalletBatch, PalletTrackingResponse, PickedLot, PickedLotsResponse, UnpickRequest, BatchWeightSummaryItem, BatchWeightSummaryResponse, BulkRunStatusResponse } from '../../services/bulk-runs.service';
 import { BangkokTimezoneService } from '../../services/bangkok-timezone.service';
 import { PrintDataService, PrintLabelData } from '../../services/print-data.service';
 import { HttpClientModule } from '@angular/common/http';
@@ -481,6 +481,34 @@ interface ProductionRun {
                           class="nwfth-input tw-w-16 tw-px-2 tw-py-2 tw-text-sm tw-font-mono tw-text-center tw-bg-gray-50"
                           placeholder=""
                           readonly>
+                      </div>
+                      <!-- Status Controls - Right side of Total Needed row -->
+                      <div class="tw-ml-auto tw-flex-shrink-0 tw-flex tw-items-center tw-gap-2">
+                        <!-- REVERT Button - Only show when status is PRINT -->
+                        <button
+                          *ngIf="currentRunStatus()?.status === 'PRINT' && !isRevertingStatus()"
+                          (click)="confirmAndRevertStatus()"
+                          class="tw-px-2 tw-py-1 tw-text-xs tw-font-semibold tw-rounded tw-border tw-bg-amber-500 tw-text-white tw-border-amber-600 hover:tw-bg-amber-600 tw-transition-colors tw-duration-200"
+                          title="Revert run status from PRINT back to NEW"
+                          type="button">
+                          REVERT to NEW
+                        </button>
+
+                        <!-- Loading state for revert -->
+                        <div
+                          *ngIf="isRevertingStatus()"
+                          class="tw-px-2 tw-py-1 tw-text-xs tw-font-semibold tw-rounded tw-border tw-bg-amber-500 tw-text-white tw-border-amber-600 tw-animate-pulse">
+                          REVERTING...
+                        </div>
+
+                        <!-- Status Flag -->
+                        <div
+                          class="tw-px-2 tw-py-1 tw-text-xs tw-font-semibold tw-rounded tw-border"
+                          [class]="getStatusFlagColor()"
+                          [title]="getStatusFlagTooltip()">
+                          <span *ngIf="!isLoadingStatus()">{{ getStatusText() }}</span>
+                          <span *ngIf="isLoadingStatus()" class="tw-animate-pulse">LOADING...</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1141,7 +1169,6 @@ interface ProductionRun {
                         <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">BinNo</th>
                         <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">DateExp</th>
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyOnHand</th>
-                        <th class="coffee-header tw-min-w-[80px] tw-text-xs md:tw-text-sm">QtyIssue</th>
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">CommitedQty</th>
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">Available Bags</th>
                       </tr>
@@ -1154,7 +1181,6 @@ interface ProductionRun {
                         <td class="table-cell tw-font-mono tw-font-semibold tw-text-xs md:tw-text-sm">{{ lot.bin_no }}</td>
                         <td class="table-cell tw-font-mono tw-text-center tw-text-xs md:tw-text-sm">{{ lot.date_exp | date:'dd/MM/yyyy' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.qty_on_hand | number:'1.2-2' }}</td>
-                        <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.qty_issue | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.committed_qty | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm tw-font-bold tw-text-green-700">{{ lot.available_bags }}</td>
                       </tr>
@@ -1281,16 +1307,17 @@ interface ProductionRun {
                 </div>
               </div>
 
-              <!-- Bins Table with 4 columns: BinNo, Description, QtyOnHand, QtyCommitSales -->
+              <!-- Bins Table with QtyOnHand, QtyCommitSales, AND Available Bags -->
               <div *ngIf="!isLoadingBinSearch() && !binSearchError() && availableBinsForLot().length > 0" class="tw-overflow-x-auto">
                 <div class="coffee-table">
                   <table class="tw-min-w-full">
                     <thead>
                       <tr>
                         <th class="coffee-header tw-min-w-[120px]">BinNo</th>
-                        <th class="coffee-header tw-min-w-[150px]">Description</th>
+                        <th class="coffee-header tw-min-w-[150px]">LOCATION</th>
                         <th class="coffee-header tw-min-w-[120px]">QtyOnHand</th>
-                        <th class="coffee-header tw-min-w-[120px]">QtyCommitSales</th>
+                        <th class="coffee-header tw-min-w-[120px]">CommitedQty</th>
+                        <th class="coffee-header tw-min-w-[120px]">Available Bags</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1301,6 +1328,7 @@ interface ProductionRun {
                         <td class="table-cell tw-text-left tw-pl-4">{{ bin.location_key || 'TFC1' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right">{{ bin.qty_on_hand | number:'1.4-4' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right">{{ bin.committed_qty | number:'1.4-4' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right tw-font-bold tw-text-green-700">{{ bin.available_bags }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1419,12 +1447,12 @@ interface ProductionRun {
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Batch No</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Lot No.</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">ItemKey</th>
-                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Location Key</th>
+                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Location</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Expiry Date</th>
-                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Qty Received</th>
+                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Qty Picked</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">BinNo</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Pack Size</th>
-                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">On Hand</th>
+                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Bags</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Actions</th>
                         </tr>
                       </thead>
@@ -1438,14 +1466,14 @@ interface ProductionRun {
                             {{lot.date_exp ? (lot.date_exp | date:'dd/MM/yyyy') : 'N/A'}}
                           </td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">
-                            {{lot.qty_received | number:'1.2-2'}}
+                            {{lot.alloc_lot_qty | number:'1.2-2'}} KG
                           </td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{lot.bin_no}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">
                             {{lot.pack_size | number:'1.2-2'}}
                           </td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">
-                            {{lot.qty_on_hand | number:'1.2-2'}}
+                            {{getBagsCount(lot.alloc_lot_qty, lot.pack_size)}}
                           </td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm">
                             <button 
@@ -1607,6 +1635,13 @@ export class BulkPickingComponent implements AfterViewInit {
   currentPage = signal(1);
   pageSize = signal(10);
   paginationInfo = signal<PaginationInfo | null>(null);
+  
+  // Run status tracking for print status flag
+  currentRunStatus = signal<BulkRunStatusResponse | null>(null);
+  isLoadingStatus = signal(false);
+
+  // Revert status state
+  isRevertingStatus = signal(false);
   
   // Search functionality for modal
   searchControl = new FormControl('');
@@ -1814,6 +1849,8 @@ export class BulkPickingComponent implements AfterViewInit {
           this.loadPalletTrackingData(runNo, currentItemKey);
           // Refresh run-level picked data for print button status
           this.refreshRunLevelPickedData();
+          // Refresh run status for status flag
+          this.refreshRunStatus();
         } else {
           this.errorMessage.set(response.message || 'Failed to load run data');
         }
@@ -1931,9 +1968,12 @@ export class BulkPickingComponent implements AfterViewInit {
       // Total needed - 4-field layout (Field1 Field2 Field3 Field4)  
       totalNeededBags: fields.total_needed_bags,                    // Field 1: from SQL (readonly)
       totalNeededBagsUom: fields.total_needed_bags_uom || 'BAGS',   // Field 2: from SQL (readonly)
-      // userInputBags: 0, // Field 3: Keep user input - DO NOT override
+      userInputBags: 0, // Field 3: Clear numpad when switching ingredients
       totalNeededWeightUom: this.getDynamicBagsUOM(fields.item_key) || 'BAGS', // Field 4: from database (changed to BAGS)
       totalNeededKg: 0, // Will be calculated from user input
+      // Clear pending pick values when switching ingredients to prevent state leakage
+      pendingPickBags: 0,
+      pendingPickKg: '0.0000',
       // Remaining to pick - dual units (use API values directly)
       remainingToPickBags: formatDecimal(fields.remaining_bags), // Use API value
       remainingBagsUom: this.getDynamicBagsUOM(fields.item_key) || fields.remaining_bags_uom || 'BAGS',
@@ -3206,6 +3246,8 @@ export class BulkPickingComponent implements AfterViewInit {
                 
                 // Refresh run-level picked data for print button status
                 this.refreshRunLevelPickedData();
+                // Refresh run status for status flag
+                this.refreshRunStatus();
                 
                 console.log(`✅ Pick confirmed and UI state updated: ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
               },
@@ -4043,6 +4085,8 @@ export class BulkPickingComponent implements AfterViewInit {
           
           // Refresh run-level picked data for print button status
           this.refreshRunLevelPickedData();
+          // Refresh run status for status flag
+          this.refreshRunStatus();
           
           // Auto-focus on lot number field for barcode scanning workflow
           setTimeout(() => {
@@ -4524,6 +4568,136 @@ export class BulkPickingComponent implements AfterViewInit {
     });
   }
 
+  // Refresh run status for status flag display
+  private refreshRunStatus(): void {
+    const formData = this.currentFormData();
+    if (!formData?.run) return;
+    
+    const runNo = formData.run.run_no;
+    this.isLoadingStatus.set(true);
+    
+    this.bulkRunsService.getBulkRunStatus(runNo).subscribe({
+      next: (response) => {
+        if (response.success && response.data) {
+          this.currentRunStatus.set(response.data);
+          console.log(`🏁 STATUS FLAG: Run ${runNo} status: ${response.data.status}`);
+        } else {
+          this.currentRunStatus.set(null);
+          console.warn(`⚠️ STATUS FLAG: No status data for run ${runNo}`);
+        }
+        this.isLoadingStatus.set(false);
+      },
+      error: (error) => {
+        console.warn('Failed to refresh run status:', error);
+        this.currentRunStatus.set(null);
+        this.isLoadingStatus.set(false);
+      }
+    });
+  }
+
+  // Get status flag color based on current run status
+  getStatusFlagColor(): string {
+    const status = this.currentRunStatus()?.status;
+    switch (status) {
+      case 'PRINT':
+        return 'tw-bg-red-500 tw-text-white tw-border-red-600'; // RED for PRINT
+      case 'NEW':
+        return 'tw-bg-green-500 tw-text-white tw-border-green-600'; // GREEN for NEW
+      default:
+        return 'tw-bg-gray-500 tw-text-white tw-border-gray-600'; // Gray for unknown/other
+    }
+  }
+
+  // Get status flag text for display
+  getStatusText(): string {
+    const status = this.currentRunStatus()?.status;
+    switch (status) {
+      case 'PRINT':
+        return 'PRINT';
+      case 'NEW':
+        return 'NEW';
+      default:
+        return 'UNKNOWN';
+    }
+  }
+
+  // Get status flag tooltip text
+  getStatusFlagTooltip(): string {
+    const status = this.currentRunStatus()?.status;
+    const runNo = this.currentRunStatus()?.run_no;
+    switch (status) {
+      case 'PRINT':
+        return `Run ${runNo}: Ready to print labels`;
+      case 'NEW':
+        return `Run ${runNo}: Picking in progress`;
+      default:
+        return `Run ${runNo}: Status ${status || 'Unknown'}`;
+    }
+  }
+
+  /**
+   * **REVERT STATUS FUNCTIONALITY** - Confirm and revert run status from PRINT to NEW
+   * Shows confirmation dialog and executes revert operation
+   */
+  confirmAndRevertStatus(): void {
+    const runNo = this.currentRunStatus()?.run_no;
+    if (!runNo) {
+      console.warn('⚠️ No run number available for status revert');
+      return;
+    }
+
+    // Show confirmation dialog
+    const confirmed = confirm(
+      `Are you sure you want to revert Run ${runNo} status from PRINT back to NEW?\n\n` +
+      `This will allow you to make changes and unpick ingredients if needed.\n\n` +
+      `Click OK to proceed, or Cancel to abort.`
+    );
+
+    if (confirmed) {
+      this.executeStatusRevert(runNo);
+    }
+  }
+
+  /**
+   * Execute the status revert operation
+   */
+  private executeStatusRevert(runNo: number): void {
+    this.isRevertingStatus.set(true);
+    console.log(`🔄 COMPONENT: Starting status revert for run ${runNo}`);
+
+    this.bulkRunsService.revertRunStatus(runNo).subscribe({
+      next: (response) => {
+        this.isRevertingStatus.set(false);
+
+        if (response.success) {
+          console.log(`✅ COMPONENT: Successfully reverted run ${runNo} status to NEW`);
+
+          // Update the current run status with the response data
+          if (response.data) {
+            this.currentRunStatus.set(response.data);
+          }
+
+          // Refresh the run status to ensure UI is up to date
+          this.refreshRunStatus();
+
+          // Show success message
+          alert(`✅ Run ${runNo} status successfully reverted from PRINT to NEW!\n\nYou can now make changes and unpick ingredients if needed.`);
+
+        } else {
+          console.warn(`⚠️ COMPONENT: Failed to revert run ${runNo} status: ${response.message}`);
+          alert(`⚠️ Failed to revert run status: ${response.message}`);
+        }
+      },
+      error: (error) => {
+        this.isRevertingStatus.set(false);
+        console.error(`❌ COMPONENT: Error reverting run ${runNo} status:`, error);
+
+        const errorMessage = error.message || 'Unknown error occurred';
+        alert(`❌ Error reverting run status: ${errorMessage}\n\nPlease try again or contact support if the problem persists.`);
+      }
+    });
+  }
+
   // Transform picked lots data to format expected by print service
   private transformPickedLotsToPickedItems(pickedLots: PickedLot[]): any[] {
     return pickedLots.map(lot => ({
@@ -4800,6 +4974,14 @@ export class BulkPickingComponent implements AfterViewInit {
     return 0;
   }
 
+
+  /**
+   * Calculate number of bags from picked quantity and pack size
+   */
+  getBagsCount(allocQty: number, packSize: number): number {
+    if (!packSize || packSize <= 0) return 0;
+    return Math.round(allocQty / packSize);
+  }
 
   goBack(): void {
     this.router.navigate(['/dashboard']);

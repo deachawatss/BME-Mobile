@@ -4,7 +4,7 @@ use crate::models::inventory::{AlertSeverity, InventoryAlert, InventoryAlertType
 use crate::utils::timezone::convert_to_utc;
 use anyhow::{Context, Result};
 use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive};
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use tiberius::{Query as TiberiusQuery, Row};
 use tracing::{error, info, instrument, warn};
 
@@ -250,6 +250,55 @@ impl Database {
             Ok(Some(run))
         } else {
             info!("Bulk run not found: {}", run_no);
+            Ok(None)
+        }
+    }
+
+    /// Get bulk run status information
+    #[instrument(skip(self))]
+    pub async fn get_bulk_run_status(&self, run_no: i32) -> Result<Option<BulkRunStatusResponse>> {
+        info!("Getting bulk run status: {}", run_no);
+
+        let mut client = self
+            .get_client()
+            .await
+            .context("Failed to get read database client")?;
+
+        let query = r#"
+            SELECT 
+                RunNo,
+                Status,
+                FormulaDesc,
+                ModifiedDate
+            FROM Cust_BulkRun 
+            WHERE RunNo = @P1
+            ORDER BY RowNum DESC
+        "#;
+
+        let mut select = TiberiusQuery::new(query);
+        select.bind(run_no);
+
+        let stream = select
+            .query(&mut client)
+            .await
+            .context("Failed to query bulk run status")?;
+
+        if let Some(row) = stream.into_first_result().await?.first() {
+            // Handle SQL Server datetime - can be null
+            let last_modified = row.get::<NaiveDateTime, _>("ModifiedDate")
+                .map(|naive_dt| naive_dt.and_utc());
+            
+            let status_response = BulkRunStatusResponse {
+                run_no: row.get::<i32, _>("RunNo").unwrap_or(run_no),
+                status: row.get::<&str, _>("Status").unwrap_or("UNKNOWN").to_string(),
+                formula_desc: row.get::<&str, _>("FormulaDesc").unwrap_or("").to_string(),
+                last_modified,
+            };
+            
+            info!("Found bulk run status: {} - {}", run_no, status_response.status);
+            Ok(Some(status_response))
+        } else {
+            info!("Bulk run status not found: {}", run_no);
             Ok(None)
         }
     }
@@ -2223,8 +2272,10 @@ impl Database {
         // **UNIFIED PATTERN**: All operations now use TFCPILOT3 directly
         info!("✅ All operations completed successfully on TFCPILOT3 primary database");
 
-        // **STEP 6: CHECK & UPDATE RUN COMPLETION** - BME4 Compatible Run Status Update
-        info!("🔄 DEBUG: STEP 6 - Checking for run completion and updating status NEW → PRINT");
+        // **SMART COMPLETION**: Step 6 completion check - Only triggers when ALL item keys are completely picked
+        // Status changes NEW → PRINT automatically only when the FINAL pick of the LAST ingredient is completed
+        // This ensures status change happens once when truly all ingredients are done, not after each individual pick
+        info!("🔄 DEBUG: STEP 6 - Smart completion check: Verifying if ALL ingredients are now complete");
         
         let completion_check_result = self.check_and_update_run_completion(
             &mut client,
@@ -2235,19 +2286,19 @@ impl Database {
         
         match completion_check_result {
             Ok(true) => {
-                info!("🎉 DEBUG: Step 6 completed - Run {} status updated from NEW → PRINT (all bulk ingredients completed)", run_no);
+                info!("🎉 DEBUG: Step 6 SMART COMPLETION - Run {} status updated NEW → PRINT (ALL bulk ingredients now completely picked)", run_no);
             },
             Ok(false) => {
-                info!("📋 DEBUG: Step 6 - Run {} still has incomplete bulk ingredients (Status remains NEW)", run_no);
+                info!("📋 DEBUG: Step 6 - Run {} still has incomplete ingredients (Status remains NEW, more picking needed)", run_no);
             },
             Err(e) => {
-                warn!("⚠️ DEBUG: Step 6 non-critical error - Run completion check failed: {}. Pick operation succeeded but status not updated.", e);
+                warn!("⚠️ DEBUG: Step 6 non-critical error - Smart completion check failed: {}. Pick operation succeeded but status not updated.", e);
                 // Continue - this is not critical for the main pick operation
             }
         }
 
-            // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully using auto-commit
-            info!("🎉 AUTO_COMMIT_COMPLETE: All 6-step bulk picking operations completed successfully");
+            // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully with smart completion detection
+            info!("🎉 AUTO_COMMIT_COMPLETE: All 6-step bulk picking operations completed successfully (smart completion enabled)");
             info!("✅ SIMPLE_MODE_SUCCESS: Each operation auto-committed - all changes permanent");
 
             Ok(PickConfirmationResponse {
@@ -2986,7 +3037,8 @@ impl Database {
     /// **BME4 RUN COMPLETION DETECTION** - Step 6 of bulk picking workflow
     /// Check if all bulk ingredients are completed and update Cust_BulkRun status from NEW → PRINT
     /// Returns Ok(true) if status was updated, Ok(false) if not yet complete, Err for database errors
-    async fn check_and_update_run_completion(
+    /// NOTE: Available for manual completion trigger via API endpoints
+    pub async fn check_and_update_run_completion(
         &self,
         client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,
         run_no: i32,
@@ -3063,6 +3115,69 @@ impl Database {
             info!("✅ Successfully replicated run completion status to TFCMOBILE");
         }
         
+        Ok(true)
+    }
+
+    /// **REVERT STATUS OPERATION** - Revert bulk run status from PRINT back to NEW
+    /// Used when user wants to make changes after run completion
+    /// Updates all batch records for the specified run
+    pub async fn revert_run_status_to_new(
+        &self,
+        run_no: i32,
+        user_id: &str,
+    ) -> Result<bool> {
+        let mut client = self.get_client().await
+            .context("Failed to get database connection for status revert")?;
+
+        // Get current Bangkok timestamp
+        let bangkok_now = crate::utils::timezone::bangkok_now_sql_server();
+
+        info!("🔄 REVERT: Starting status revert for run {} (PRINT → NEW) by user {}", run_no, user_id);
+
+        // Update all batch records for this run from PRINT to NEW
+        let revert_query = r#"
+            UPDATE Cust_BulkRun
+            SET Status = 'NEW',
+                ModifiedBy = @P1,
+                ModifiedDate = @P2
+            WHERE RunNo = @P3
+              AND Status = 'PRINT'
+        "#;
+
+        // Truncate user_id to fit database field constraints (ModifiedBy is limited to 8 characters)
+        let user_id_truncated = if user_id.len() > 8 {
+            &user_id[..8]
+        } else {
+            user_id
+        };
+
+        let mut revert_stmt = tiberius::Query::new(revert_query);
+        revert_stmt.bind(user_id_truncated);
+        revert_stmt.bind(&bangkok_now);
+        revert_stmt.bind(run_no);
+
+        let revert_result = revert_stmt.execute(&mut client)
+            .await
+            .context("Failed to revert run status")?;
+
+        let affected_rows = revert_result.rows_affected().iter().sum::<u64>();
+
+        if affected_rows == 0 {
+            // No rows were updated - either run doesn't exist or not in PRINT status
+            warn!("⚠️ REVERT: No rows updated for run {} - run may not exist or not in PRINT status", run_no);
+            return Ok(false);
+        }
+
+        info!("✅ REVERT: Successfully reverted run {} status PRINT → NEW (affected {} batch records) by user {}",
+              run_no, affected_rows, user_id);
+
+        // **REPLICATION TO TFCMOBILE** - Best effort sync of status revert
+        if let Err(e) = self.replicate_run_status_revert(run_no, user_id, &bangkok_now).await {
+            warn!("⚠️ Status revert replication to TFCMOBILE failed (non-critical): {}", e);
+        } else {
+            info!("✅ Successfully replicated status revert to TFCMOBILE");
+        }
+
         Ok(true)
     }
 
@@ -3260,11 +3375,12 @@ impl Database {
                 blp.RecUserid,
                 blp.AllocLotQty,
                 blp.PackSize,
-                blp.DateExpiry,
+                lm.DateExpiry,
                 blp.QtyOnHand,
                 blp.QtyReceived
             FROM Cust_BulkLotPicked blp
             INNER JOIN cust_BulkPicked bp ON bp.RunNo = blp.RunNo AND bp.RowNum = blp.RowNum AND bp.LineId = blp.LineId
+            LEFT JOIN LotMaster lm ON lm.LotNo = blp.LotNo AND lm.ItemKey = bp.ItemKey AND lm.LocationKey = bp.Location AND lm.BinNo = blp.BinNo
             WHERE blp.RunNo = @P1 AND bp.ItemKey = @P2
             ORDER BY blp.RecDate ASC, blp.LotTranNo ASC
         "#;
@@ -3482,11 +3598,12 @@ impl Database {
                 blp.RecUserid,
                 blp.AllocLotQty,
                 blp.PackSize,
-                blp.DateExpiry,
+                lm.DateExpiry,
                 blp.QtyOnHand,
                 blp.QtyReceived
             FROM Cust_BulkLotPicked blp
             INNER JOIN cust_BulkPicked bp ON bp.RunNo = blp.RunNo AND bp.RowNum = blp.RowNum AND bp.LineId = blp.LineId
+            LEFT JOIN LotMaster lm ON lm.LotNo = blp.LotNo AND lm.ItemKey = bp.ItemKey AND lm.LocationKey = bp.Location AND lm.BinNo = blp.BinNo
             WHERE blp.RunNo = @P1
             ORDER BY bp.ItemKey ASC, bp.BatchNo ASC, blp.RecDate ASC, blp.LotTranNo ASC
         "#;

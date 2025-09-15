@@ -788,4 +788,45 @@ impl BulkRunsService {
             .await
             .context("Failed to get next available pallet")
     }
+
+    /// **REVERT STATUS SERVICE** - Revert bulk run status from PRINT back to NEW
+    /// Used when user wants to make changes after run completion
+    #[instrument(skip(self))]
+    pub async fn revert_bulk_run_status(&self, run_no: i32, user_id: &str) -> Result<bool> {
+        info!("🔄 SERVICE: Starting status revert for run {} by user {}", run_no, user_id);
+
+        // Validate that the run exists and is in PRINT status
+        let current_status_option = self.database
+            .get_bulk_run_status(run_no)
+            .await
+            .context("Failed to get current run status")?;
+
+        let current_status = match current_status_option {
+            Some(status) => status,
+            None => {
+                warn!("⚠️ SERVICE: Cannot revert run {} - run not found", run_no);
+                return Ok(false);
+            }
+        };
+
+        if current_status.status != "PRINT" {
+            warn!("⚠️ SERVICE: Cannot revert run {} - current status is '{}', expected 'PRINT'",
+                  run_no, current_status.status);
+            return Ok(false);
+        }
+
+        // Perform the actual revert operation
+        let revert_success = self.database
+            .revert_run_status_to_new(run_no, user_id)
+            .await
+            .context("Failed to revert run status in database")?;
+
+        if revert_success {
+            info!("✅ SERVICE: Successfully reverted run {} status from PRINT to NEW", run_no);
+        } else {
+            warn!("⚠️ SERVICE: Failed to revert run {} status - no rows were updated", run_no);
+        }
+
+        Ok(revert_success)
+    }
 }

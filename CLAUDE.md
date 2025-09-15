@@ -124,6 +124,8 @@ npm run test:e2e     # runs Playwright E2E tests
 - **CRITICAL**: Always fix ALL compilation warnings after `cargo run`, `cargo check`, or `cargo build`
 - **MANDATORY**: Never ignore warnings - they MUST be resolved immediately after any build/start operation
 - **WARNING POLICY**: Fix warnings by removing unused code, not by disabling/hiding them
+- **NEVER USE**: `#[allow(dead_code)]`, `#[allow(unused_imports)]`, `#[allow(unused_variables)]` or similar warning suppressions
+- **PROPER FIX**: Remove unused code, make functions public if needed for API access, or refactor to eliminate warnings
 - **EXAMPLES**: Remove unused imports, unused variables, dead code, unused functions
 - Files/functions `snake_case`, types `CamelCase`, modules `snake_case`
 

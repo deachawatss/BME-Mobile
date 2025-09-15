@@ -546,6 +546,65 @@ impl Database {
         
         Ok(())
     }
+
+    /// Replicate run status revert to TFCMOBILE
+    /// Best-effort replication for Cust_BulkRun status change from PRINT → NEW
+    pub async fn replicate_run_status_revert(
+        &self,
+        run_no: i32,
+        user_id: &str,
+        modified_date: &str,
+    ) -> Result<()> {
+        // Skip replication if no replica configuration is available
+        let Some(_replica_config) = &self.replica_config else {
+            info!("⚠️ TFCMOBILE replica configuration not available - skipping status revert replication for run {}", run_no);
+            return Ok(());
+        };
+
+        // Update Cust_BulkRun status in TFCMOBILE to match TFCPILOT3
+        let update_query = r#"
+            UPDATE Cust_BulkRun
+            SET Status = 'NEW',
+                ModifiedBy = @P1,
+                ModifiedDate = @P2
+            WHERE RunNo = @P3
+              AND Status = 'PRINT'
+        "#;
+
+        let mut client = match self.get_replica_client().await? {
+            Some(client) => client,
+            None => {
+                info!("⚠️ No replica database configured, skipping status revert replication");
+                return Ok(());
+            }
+        };
+
+        // Truncate user_id to fit database field constraints (ModifiedBy is limited to 8 characters)
+        let user_id_truncated = if user_id.len() > 8 {
+            &user_id[..8]
+        } else {
+            user_id
+        };
+
+        let mut update_stmt = tiberius::Query::new(update_query);
+        update_stmt.bind(user_id_truncated);
+        update_stmt.bind(modified_date);
+        update_stmt.bind(run_no);
+
+        let result = update_stmt.execute(&mut client)
+            .await
+            .context("Failed to replicate status revert to TFCMOBILE")?;
+
+        let affected_rows = result.rows_affected().iter().sum::<u64>();
+
+        if affected_rows > 0 {
+            info!("✅ Successfully replicated run status revert to TFCMOBILE - Run: {}, Rows affected: {}", run_no, affected_rows);
+        } else {
+            warn!("⚠️ No rows affected in TFCMOBILE status revert replication - Run: {} may not exist in replica database or not in PRINT status", run_no);
+        }
+
+        Ok(())
+    }
 }
 
 /// Health report for replication monitoring

@@ -2,11 +2,11 @@
 
 **Reference Run**: 215165 (PRINT status - completed workflow)  
 **Analysis Date**: 2025-09-04  
-**Last Update**: 2025-09-08 (Manual Ingredient Switching Fix Applied)  
+**Last Update**: 2025-09-12 (ViewPicked Lot Duplication Fix Applied)  
 **System Status**: Complete 6-Step Workflow Implemented ✅  
 **Database Investigation**: Official vs Test Users Complete ✅  
 **Workflow Verification**: All Tables Confirmed ✅  
-**Latest Fix**: Manual Ingredient Switching Bug Resolved ✅
+**Latest Fix**: ViewPicked Lot Triple Display Bug Resolved ✅
 
 ## 🎯 **EXECUTIVE SUMMARY**
 
@@ -224,6 +224,24 @@ END
    - **Impact**: Perfect consistency with BME4 - NPD lots excluded, proper FEFO ordering restored
    - **Files Modified**: `backend/src/database/bulk_runs.rs:1044,1096,1102` (count and main queries)
 
+8. **Smart Run Completion Behavior Implemented** ✅ (2025-09-12)
+   - **Enhancement**: Run status changes from NEW → PRINT automatically when ALL required ingredients are completely picked
+   - **Behavior**: Status change occurs only after the final pick of the last ingredient, not after each individual pick
+   - **Logic**: Step 6 completion check runs after every pick, but only changes status when `IncompleteCount = 0`
+   - **SQL Logic**: `SELECT COUNT(*) FROM cust_BulkPicked WHERE RunNo = @run_no AND ToPickedBulkQty > 0 AND (PickedBulkQty < ToPickedBulkQty OR PickedBulkQty IS NULL)`
+   - **Impact**: Automatic workflow completion without manual intervention, triggers exactly once when truly complete
+   - **Files Modified**: `backend/src/database/bulk_runs.rs:2275-2298` (Step 6 completion logic)
+
+9. **ViewPicked Lot Triple Display Bug Resolved** ✅ (2025-09-12)
+   - **Problem**: Picking 1 bag showed 3 identical records in ViewPicked Lot display (Run 215234, INBC5548)
+   - **Root Cause**: Missing BinNo in LotMaster JOIN condition caused Cartesian product with multiple bin records
+   - **Database Reality**: Only 1 actual record in `Cust_BulkLotPicked` table, but query joined with 3 LotMaster records (K0802-2B, K0900-1A, T0706-2B)
+   - **Solution Applied**: Added `AND lm.BinNo = blp.BinNo` to LotMaster JOIN condition in ViewPicked queries
+   - **Before**: `LEFT JOIN LotMaster lm ON lm.LotNo = blp.LotNo AND lm.ItemKey = bp.ItemKey AND lm.LocationKey = bp.Location`
+   - **After**: `LEFT JOIN LotMaster lm ON lm.LotNo = blp.LotNo AND lm.ItemKey = bp.ItemKey AND lm.LocationKey = bp.Location AND lm.BinNo = blp.BinNo`
+   - **Impact**: ViewPicked Lot now displays exactly 1 record when 1 bag is picked - perfect data integrity maintained
+   - **Files Modified**: `backend/src/database/bulk_runs.rs:3320,3572` (both ViewPicked query locations)
+
 ---
 
 ## 📋 **BUSINESS RULES & VALIDATION**
@@ -308,6 +326,58 @@ AND (b.User4 IS NULL OR b.User4 != 'PARTIAL')
 - [x] Replica database (TFCMOBILE) synchronization
 - [x] Error handling and transaction rollback
 - [x] Performance optimization (<200ms pick operations)
+
+---
+
+## 🎯 **RUN COMPLETION BEHAVIOR - CRITICAL UNDERSTANDING**
+
+### **When Status Changes NEW → PRINT**
+
+**IMPORTANT**: The run status changes from NEW to PRINT **automatically** when the user picks ALL required ingredient item keys completely.
+
+#### **Step-by-Step Behavior**
+1. **During Picking**: Status remains NEW while ingredients are partially picked
+2. **After Each Pick**: Step 6 completion check runs automatically
+3. **Completion Detection**: System checks if `COUNT(*) = 0` for incomplete ingredients
+4. **Status Update**: When final bag of final ingredient is picked → Status immediately changes to PRINT
+5. **User Experience**: No manual action required - fully automatic workflow completion
+
+#### **Completion Logic SQL**
+```sql
+-- This query returns 0 only when ALL required ingredients are complete
+SELECT COUNT(*) as IncompleteCount
+FROM cust_BulkPicked 
+WHERE RunNo = @run_no 
+  AND ToPickedBulkQty > 0                              -- Only required ingredients
+  AND (PickedBulkQty < ToPickedBulkQty OR PickedBulkQty IS NULL)  -- Still incomplete
+```
+
+#### **Example Scenario**
+- **Run 215234** with ingredients A, B, C (all requiring 10 bags each)
+- Pick A: 10 bags → Status: NEW (B and C still incomplete)
+- Pick B: 10 bags → Status: NEW (C still incomplete) 
+- Pick C: 10 bags → Status: **PRINT** (all complete!) ✅
+
+**Key Point**: Status changes exactly **ONCE** when truly all ingredients are done, not after each individual ingredient.
+
+### **ViewPicked Lot Display Behavior**
+
+**CRITICAL**: ViewPicked Lot shows **exactly** the number of records that were actually picked.
+
+#### **Data Source & Logic**
+- **Source Query**: Joins `Cust_BulkLotPicked` ⟵ `cust_BulkPicked` ⟵ `LotMaster`
+- **Critical JOIN**: Must include BinNo to prevent Cartesian products
+- **Correct Logic**: `LEFT JOIN LotMaster lm ON lm.LotNo = blp.LotNo AND lm.ItemKey = bp.ItemKey AND lm.LocationKey = bp.Location AND lm.BinNo = blp.BinNo`
+
+#### **Expected Behavior**
+- Pick 1 bag → Display 1 record ✅
+- Pick 3 bags → Display 3 records ✅  
+- **Never**: Pick 1 bag → Display 3 records ❌ (was bug, now fixed)
+
+#### **Debugging ViewPicked Issues**
+1. **Check Database**: Query `Cust_BulkLotPicked` directly to see actual records
+2. **Verify JOIN**: Ensure BinNo is included in all LotMaster JOIN conditions
+3. **Count Records**: Compare database count vs display count - should be identical
 
 ---
 
