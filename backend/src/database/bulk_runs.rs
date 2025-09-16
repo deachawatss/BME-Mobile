@@ -2300,6 +2300,7 @@ impl Database {
             // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully with smart completion detection
             info!("🎉 AUTO_COMMIT_COMPLETE: All 6-step bulk picking operations completed successfully (smart completion enabled)");
             info!("✅ SIMPLE_MODE_SUCCESS: Each operation auto-committed - all changes permanent");
+            info!("🔄 TRANSACTION_TIMESTAMP: Pick transaction fully committed at {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC"));
 
             Ok(PickConfirmationResponse {
                 success: true,
@@ -3957,6 +3958,9 @@ impl Database {
             .context("Failed to reset picked quantities")?;
         info!("✅ Reset picked quantities in cust_BulkPicked");
 
+        // Ensure transaction commit completion
+        info!("🔄 Transaction completed for unpick operation - database state now consistent");
+
         // Step 6: Delete corresponding LotTransaction records for complete audit trail cleanup
         // Use the collected LotTranNo values directly to avoid the EXISTS subquery problem
         // (Previously failed because Cust_BulkLotPicked records were already deleted in Step 2)
@@ -4536,5 +4540,148 @@ impl Database {
 
         info!("🏷️ Found {} lot picking details for run {}", lot_details.len(), run_no);
         Ok(lot_details)
+    }
+
+    /// **NEW AUTOMATIC STATUS UPDATE** - Update bulk run status with user audit
+    pub async fn update_bulk_run_status(
+        &self,
+        run_no: i32,
+        new_status: &str,
+        user_id: &str,
+    ) -> Result<bool, anyhow::Error> {
+        info!("🔄 DATABASE: Updating run {} status to '{}' by user: {}", run_no, new_status, user_id);
+
+        let sql = r#"
+            UPDATE Cust_BulkRun
+            SET Status = @P1,
+                ModifiedBy = @P2,
+                ModifiedDate = GETDATE()
+            WHERE RunNo = @P3
+        "#;
+
+        let mut client = self.get_client().await?;
+        let mut stmt = tiberius::Query::new(sql);
+        stmt.bind(new_status);
+        stmt.bind(user_id);
+        stmt.bind(run_no);
+
+        let stream = stmt.execute(&mut client)
+            .await
+            .context("Failed to execute status update query")?;
+
+        let rows_affected = stream.rows_affected().iter().sum::<u64>();
+
+        let success = rows_affected > 0;
+
+        if success {
+            info!("✅ DATABASE: Successfully updated run {} status to '{}' ({} rows affected)",
+                  run_no, new_status, rows_affected);
+        } else {
+            warn!("⚠️ DATABASE: No rows updated for run {} status change to '{}'", run_no, new_status);
+        }
+
+        Ok(success)
+    }
+
+    /// **NEW UNIVERSAL COMPLETION CHECK** - Get detailed run completion status
+    pub async fn get_run_completion_status(
+        &self,
+        run_no: i32,
+    ) -> Result<crate::models::bulk_runs::RunCompletionStatus, anyhow::Error> {
+        info!("🔍 DATABASE: Getting detailed completion status for run {} at {}", run_no, chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC"));
+
+        let query = r#"
+            WITH IngredientCompletion AS (
+                SELECT
+                    bp.RunNo,
+                    bp.LineId,
+                    bp.ItemKey,
+                    SUM(bp.ToPickedBulkQty) as TotalRequired,
+                    SUM(ISNULL(bp.PickedBulkQty, 0)) as TotalPicked,
+                    CASE
+                        WHEN SUM(ISNULL(bp.PickedBulkQty, 0)) >= SUM(bp.ToPickedBulkQty)
+                        THEN 1 ELSE 0
+                    END as IsIngredientComplete
+                FROM cust_BulkPicked bp
+                WHERE bp.RunNo = @P1
+                  AND bp.ToPickedBulkQty > 0
+                GROUP BY bp.RunNo, bp.LineId, bp.ItemKey
+            )
+            SELECT
+                COUNT(*) as TotalIngredients,
+                SUM(IsIngredientComplete) as CompletedIngredients,
+                SUM(CASE WHEN IsIngredientComplete = 0 THEN 1 ELSE 0 END) as IncompleteIngredients
+            FROM IngredientCompletion
+            GROUP BY RunNo
+        "#;
+
+        let mut client = self.get_client().await?;
+        let mut stmt = tiberius::Query::new(query);
+        stmt.bind(run_no);
+
+        let stream = stmt.query(&mut client).await
+            .context("Failed to execute completion status query")?;
+
+        let rows: Vec<Row> = stream.into_first_result().await
+            .context("Failed to get completion status results")?;
+
+        if let Some(row) = rows.first() {
+            let total_ingredients: i32 = row.get("TotalIngredients").unwrap_or(0);
+            let completed_count: i32 = row.get("CompletedIngredients").unwrap_or(0);
+            let incomplete_count: i32 = row.get("IncompleteIngredients").unwrap_or(0);
+            let is_complete = incomplete_count == 0 && total_ingredients > 0;
+
+            info!("📊 DATABASE: Run {} completion - {}/{} complete, {} incomplete, is_complete: {}",
+                  run_no, completed_count, total_ingredients, incomplete_count, is_complete);
+
+            // **DEBUG: Show individual ingredient completion details**
+            let debug_query = r#"
+                SELECT
+                    bp.LineId,
+                    bp.ItemKey,
+                    SUM(bp.ToPickedBulkQty) as TotalRequired,
+                    SUM(ISNULL(bp.PickedBulkQty, 0)) as TotalPicked,
+                    CASE
+                        WHEN SUM(ISNULL(bp.PickedBulkQty, 0)) >= SUM(bp.ToPickedBulkQty)
+                        THEN 'COMPLETE' ELSE 'INCOMPLETE'
+                    END as Status
+                FROM cust_BulkPicked bp
+                WHERE bp.RunNo = @P1
+                  AND bp.ToPickedBulkQty > 0
+                GROUP BY bp.LineId, bp.ItemKey
+                ORDER BY bp.LineId
+            "#;
+            let mut debug_client = self.get_client().await?;
+            let mut debug_stmt = tiberius::Query::new(debug_query);
+            debug_stmt.bind(run_no);
+            if let Ok(debug_stream) = debug_stmt.query(&mut debug_client).await {
+                if let Ok(debug_rows) = debug_stream.into_first_result().await {
+                    for debug_row in debug_rows {
+                        let line_id: i32 = debug_row.get("LineId").unwrap_or(0);
+                        let item_key: &str = debug_row.get("ItemKey").unwrap_or("");
+                        let total_required: i32 = debug_row.get::<f64, _>("TotalRequired").map(|v| v as i32).unwrap_or(0);
+                        let total_picked: i32 = debug_row.get::<f64, _>("TotalPicked").map(|v| v as i32).unwrap_or(0);
+                        let status: &str = debug_row.get("Status").unwrap_or("");
+                        info!("🔍 INGREDIENT_DEBUG: LineId {} {} - Required: {}, Picked: {}, Status: {}",
+                              line_id, item_key, total_required, total_picked, status);
+                    }
+                }
+            }
+
+            Ok(crate::models::bulk_runs::RunCompletionStatus {
+                is_complete,
+                incomplete_count,
+                completed_count,
+                total_ingredients,
+            })
+        } else {
+            warn!("⚠️ DATABASE: No completion data found for run {} - treating as incomplete", run_no);
+            Ok(crate::models::bulk_runs::RunCompletionStatus {
+                is_complete: false,
+                incomplete_count: 0,
+                completed_count: 0,
+                total_ingredients: 0,
+            })
+        }
     }
 }

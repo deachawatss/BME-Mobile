@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
-use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
+use tiberius::{AuthMethod, Client, Config, EncryptionLevel, Query, Row};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use tracing::info;
@@ -201,6 +201,30 @@ impl Database {
     /// List available database configurations
     pub fn get_available_databases(&self) -> Vec<&str> {
         self.database_configs.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Check if a table exists in the primary database
+    pub async fn table_exists(&self, table_name: &str) -> Result<bool> {
+        let mut client = self.get_client().await?;
+
+        let query = r#"
+            SELECT COUNT(*) as table_count
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_NAME = @P1 AND TABLE_TYPE = 'BASE TABLE'
+        "#;
+
+        let mut query_builder = Query::new(query);
+        query_builder.bind(table_name);
+
+        let stream = query_builder.query(&mut client).await?;
+        let rows: Vec<Vec<Row>> = stream.into_results().await?;
+
+        if let Some(row) = rows.first().and_then(|r| r.first()) {
+            let count: i32 = row.get("table_count").unwrap_or(0);
+            Ok(count > 0)
+        } else {
+            Ok(false)
+        }
     }
 }
 

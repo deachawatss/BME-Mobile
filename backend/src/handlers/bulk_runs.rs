@@ -310,6 +310,87 @@ pub async fn check_run_completion(
     }
 }
 
+/// **NEW UNIVERSAL RUN COMPLETION ENDPOINT** - Check detailed run completion status
+/// Returns comprehensive completion information for automatic status transitions
+#[instrument(skip(database))]
+pub async fn check_run_completion_status(
+    Path(run_no): Path<i32>,
+    State(database): State<Database>,
+) -> Result<Json<ApiResponse<RunCompletionStatus>>, StatusCode> {
+    info!("🔍 UNIVERSAL_COMPLETION: Checking detailed completion status for run: {}", run_no);
+
+    let service = BulkRunsService::new(database);
+
+    // Get comprehensive completion status
+    match service.get_run_completion_status(run_no).await {
+        Ok(completion_status) => {
+            info!("📊 UNIVERSAL_COMPLETION: Run {} - {}/{} complete, {} incomplete",
+                  run_no, completion_status.completed_count, completion_status.total_ingredients,
+                  completion_status.incomplete_count);
+
+            if completion_status.is_complete {
+                info!("🎉 UNIVERSAL_COMPLETION: Run {} is COMPLETE! All ingredients finished.", run_no);
+            }
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(completion_status),
+                message: format!("Completion status retrieved for run {}", run_no),
+            }))
+        }
+        Err(e) => {
+            warn!("❌ UNIVERSAL_COMPLETION: Failed to check completion status for run {}: {}", run_no, e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Failed to check run completion status: {}", e),
+            }))
+        }
+    }
+}
+
+/// **NEW AUTOMATIC STATUS UPDATE ENDPOINT** - Update run status from NEW to PRINT
+/// Triggered when all ingredients are complete for automatic workflow
+#[instrument(skip(database))]
+pub async fn complete_run_status(
+    Path(run_no): Path<i32>,
+    State(database): State<Database>,
+    headers: HeaderMap,
+) -> Result<Json<ApiResponse<StatusUpdateResult>>, StatusCode> {
+    info!("🔄 AUTO_COMPLETE: Attempting to complete run {} status (NEW → PRINT)", run_no);
+
+    // Extract user information from headers
+    let user_id = headers.get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("SYSTEM");
+
+    info!("👤 AUTO_COMPLETE: User triggering auto-completion for run {}: {}", run_no, user_id);
+
+    let service = BulkRunsService::new(database);
+
+    // Update run status from NEW to PRINT
+    match service.complete_run_status(run_no, user_id).await {
+        Ok(status_result) => {
+            info!("✅ AUTO_COMPLETE: Successfully updated run {} status: {} → {}",
+                  run_no, status_result.old_status, status_result.new_status);
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(status_result),
+                message: format!("Run {} status successfully updated to PRINT", run_no),
+            }))
+        }
+        Err(e) => {
+            warn!("❌ AUTO_COMPLETE: Failed to update run {} status: {}", run_no, e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Failed to update run status: {}", e),
+            }))
+        }
+    }
+}
+
 /// Get bulk run status
 #[instrument(skip(database))]
 pub async fn get_run_status(

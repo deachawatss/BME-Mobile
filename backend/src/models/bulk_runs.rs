@@ -389,3 +389,19 @@ pub struct LotPickingDetail {
     pub picked_bulk_qty: BigDecimal,
     pub picked_qty: BigDecimal,
 }
+
+/// **NEW UNIVERSAL RUN COMPLETION** - Detailed completion status response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunCompletionStatus {
+    pub is_complete: bool,
+    pub incomplete_count: i32,
+    pub completed_count: i32,
+    pub total_ingredients: i32,
+}
+
+/// **NEW AUTOMATIC STATUS UPDATE** - Status update result response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StatusUpdateResult {
+    pub old_status: String,
+    pub new_status: String,
+}

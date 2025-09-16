@@ -3,7 +3,7 @@ use axum::{
     http::{header, Method, StatusCode, HeaderMap},
     middleware::from_fn_with_state,
     response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use ldap3::{LdapConnAsync, Scope, SearchEntry};
@@ -90,6 +90,18 @@ pub struct DatabaseStatusResponse {
     pub timestamp: String,
 }
 
+#[derive(Serialize)]
+pub struct AuthHealthResponse {
+    pub success: bool,
+    pub status: String,
+    pub message: String,
+    pub primary_database: String,
+    pub tbl_user_exists: bool,
+    pub ldap_enabled: bool,
+    pub issues: Vec<String>,
+    pub timestamp: String,
+}
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Health check endpoint
@@ -111,6 +123,51 @@ async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatusRe
         replica_database: state.database.get_replica_database_name().map(|s| s.to_string()),
         available_databases: state.database.get_available_databases().iter().map(|s| s.to_string()).collect(),
         has_replica: state.database.has_replica(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+/// Authentication health check endpoint - validates authentication dependencies
+async fn auth_health(State(state): State<AppState>) -> Json<AuthHealthResponse> {
+    let mut issues = Vec::new();
+    let primary_db = state.database.get_primary_database_name().to_string();
+    let ldap_enabled = state.ldap_config.enabled;
+
+    // Check if tbl_user table exists
+    let tbl_user_exists = match state.database.table_exists("tbl_user").await {
+        Ok(exists) => {
+            if !exists {
+                issues.push("Authentication table 'tbl_user' not found in primary database".to_string());
+            }
+            exists
+        }
+        Err(e) => {
+            issues.push(format!("Failed to check authentication table: {}", e));
+            false
+        }
+    };
+
+    // Determine overall status
+    let status = if issues.is_empty() {
+        "healthy"
+    } else {
+        "degraded"
+    };
+
+    let message = if issues.is_empty() {
+        "All authentication dependencies are available"
+    } else {
+        "Authentication service has configuration issues"
+    };
+
+    Json(AuthHealthResponse {
+        success: issues.is_empty(),
+        status: status.to_string(),
+        message: message.to_string(),
+        primary_database: primary_db,
+        tbl_user_exists,
+        ldap_enabled,
+        issues,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -204,8 +261,17 @@ async fn login(
             }
         }
         Err(e) => {
-            warn!("❌ Authentication failed for user {}: {}", request.username, e);
-            Ok(Json(ApiResponse::error("Invalid username or password")))
+            let error_msg = e.to_string();
+            if error_msg.contains("Authentication table 'tbl_user' not found") {
+                error!("🚨 Database configuration error: {}", error_msg);
+                Ok(Json(ApiResponse::error("Authentication service unavailable. Please contact system administrator.")))
+            } else if error_msg.contains("Invalid object name 'tbl_user'") {
+                error!("🚨 Database table missing: tbl_user table not found in current database");
+                Ok(Json(ApiResponse::error("Authentication service unavailable. Please contact system administrator.")))
+            } else {
+                warn!("❌ Authentication failed for user {}: {}", request.username, e);
+                Ok(Json(ApiResponse::error("Invalid username or password")))
+            }
         }
     }
 }
@@ -390,9 +456,14 @@ async fn authenticate_sql(
     username: &str,
     password: &str,
 ) -> Result<User, Box<dyn std::error::Error + Send + Sync>> {
+    // Check if tbl_user table exists before attempting authentication
+    if !state.database.table_exists("tbl_user").await? {
+        return Err("Authentication table 'tbl_user' not found in current database".into());
+    }
+
     let query = r#"
-        SELECT uname, pword, Fname, Lname, department 
-        FROM tbl_user 
+        SELECT uname, pword, Fname, Lname, department
+        FROM tbl_user
         WHERE uname = @P1 AND ad_enabled = 1
     "#;
 
@@ -560,7 +631,25 @@ async fn main() {
 
     // Initialize database connection
     let database = database::Database::new().expect("Failed to initialize database");
-    
+
+    // Validate authentication tables exist in primary database
+    info!("🔍 Validating authentication tables in primary database...");
+    match database.table_exists("tbl_user").await {
+        Ok(true) => {
+            info!("✅ Authentication table 'tbl_user' found in primary database");
+        }
+        Ok(false) => {
+            error!("🚨 CRITICAL: Authentication table 'tbl_user' not found in primary database!");
+            error!("    This will cause SQL authentication failures for LOCAL users.");
+            error!("    Please create the tbl_user table or switch PRIMARY_DB to a database that has it.");
+            panic!("Authentication table missing - cannot start server safely");
+        }
+        Err(e) => {
+            error!("🚨 CRITICAL: Failed to check authentication table: {}", e);
+            panic!("Cannot validate authentication dependencies - server startup aborted");
+        }
+    }
+
     // Initialize authentication service
     let auth_service = AuthService::new().expect("Failed to initialize JWT authentication service");
 
@@ -590,6 +679,7 @@ async fn main() {
         // API routes
         .route("/api/health", get(health_check))
         .route("/api/database/status", get(database_status))
+        .route("/api/auth/health", get(auth_health))
         .route("/api/auth/login", post(login))
         .route("/api/auth/status", get(auth_status))
         .with_state(state.clone())
@@ -610,6 +700,8 @@ async fn main() {
                     get(bulk_runs::get_next_ingredient),
                 )
                 .route("/:run_no/completion", get(bulk_runs::check_run_completion))
+                .route("/:run_no/completion-status", get(bulk_runs::check_run_completion_status))
+                .route("/:run_no/complete", put(bulk_runs::complete_run_status))
                 .route("/:run_no/status", get(bulk_runs::get_run_status))
                 .route("/:run_no/search-items", get(bulk_runs::search_run_items))
                 .route("/:run_no/ingredient-index", get(bulk_runs::get_ingredient_index))

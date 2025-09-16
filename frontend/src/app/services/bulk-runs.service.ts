@@ -346,6 +346,9 @@ export class BulkRunsService {
   private errorMessage = signal<string | null>(null);
   private inventoryStatus = signal<InventoryStatus | null>(null);
 
+  // RACE CONDITION FIX: Ingredient loading protection
+  private ingredientLoadingMutex = new Map<string, boolean>();
+
   // Public accessors for reactive state
   getCurrentRun = this.currentRun.asReadonly();
   getCurrentFormData = this.currentFormData.asReadonly();
@@ -746,11 +749,34 @@ export class BulkRunsService {
   }
 
   /**
-   * Load form data for a specific ingredient by ItemKey within a run
+   * Load form data for a specific ingredient by ItemKey within a run - RACE CONDITION PROTECTED
    */
   loadIngredientByItemKey(runNo: number, itemKey: string): Observable<ApiResponse<BulkRunFormData>> {
+    const mutexKey = `${runNo}-${itemKey}`;
+
+    // RACE CONDITION FIX: Check if loading is already in progress for this ingredient
+    if (this.ingredientLoadingMutex.get(mutexKey)) {
+      console.log(`🔒 INGREDIENT_MUTEX: Loading already in progress for ${itemKey} in run ${runNo} - returning cached data`);
+
+      // Return current form data if available, otherwise throw error
+      const currentData = this.currentFormData();
+      if (currentData && currentData.form_data.item_key === itemKey) {
+        return of({
+          success: true,
+          data: currentData,
+          message: 'Using cached ingredient data'
+        });
+      } else {
+        return throwError(() => new Error(`Ingredient loading in progress for ${itemKey}`));
+      }
+    }
+
+    // Set mutex
+    this.ingredientLoadingMutex.set(mutexKey, true);
     this.isLoading.set(true);
     this.errorMessage.set(null);
+
+    console.log(`🔒 INGREDIENT_MUTEX: Starting protected load for ingredient ${itemKey} in run ${runNo}`);
 
     // Get the correct ingredient index using the dedicated endpoint
     return this.http.get<ApiResponse<number>>(`${this.baseUrl}/${runNo}/ingredient-index?item_key=${itemKey}`).pipe(
@@ -758,24 +784,35 @@ export class BulkRunsService {
         if (!indexResponse.success || indexResponse.data === null || indexResponse.data === undefined) {
           throw new Error(`Failed to find ingredient index for ${itemKey} in run ${runNo}`);
         }
-        
+
         const ingredientIndex = indexResponse.data;
         console.log(`🔧 SERVICE: Resolved ingredient ${itemKey} to index ${ingredientIndex}`);
-        
+
         // Get the form data for the resolved ingredient index
         return this.getBulkRunFormData(runNo, ingredientIndex);
       }),
       tap(response => {
-        this.isLoading.set(false);
-        if (response.success && response.data) {
-          console.log(`🔧 SERVICE: loadIngredientByItemKey returning data for ingredient: ${response.data.form_data.item_key}`);
-          this.currentFormData.set(response.data);
+        try {
+          this.isLoading.set(false);
+          if (response.success && response.data) {
+            console.log(`🔧 SERVICE: loadIngredientByItemKey returning data for ingredient: ${response.data.form_data.item_key}`);
+            this.currentFormData.set(response.data);
+          }
+        } finally {
+          // Always release the mutex
+          this.ingredientLoadingMutex.delete(mutexKey);
+          console.log(`🔓 INGREDIENT_MUTEX: Released mutex for ${itemKey} in run ${runNo}`);
         }
       }),
       catchError(error => {
         this.isLoading.set(false);
         const errorMsg = error.message || 'Failed to load ingredient data';
         this.errorMessage.set(errorMsg);
+
+        // Always release the mutex on error
+        this.ingredientLoadingMutex.delete(mutexKey);
+        console.log(`🔓 INGREDIENT_MUTEX: Released mutex (error) for ${itemKey} in run ${runNo}`);
+
         return throwError(() => new Error(errorMsg));
       })
     );
@@ -1228,5 +1265,71 @@ export class BulkRunsService {
           return throwError(() => new Error(errorMsg));
         })
       );
+  }
+
+  /**
+   * Check if run is complete (all required ingredients picked) - Universal completion detection
+   * Used to trigger automatic status update from NEW → PRINT
+   */
+  checkDetailedRunCompletion(runNo: number): Observable<ApiResponse<{
+    is_complete: boolean;
+    incomplete_count: number;
+    completed_count: number;
+    total_ingredients: number;
+  }>> {
+    console.log(`🔍 SERVICE: Checking detailed run completion for run ${runNo}`);
+
+    return this.http.get<ApiResponse<{
+      is_complete: boolean;
+      incomplete_count: number;
+      completed_count: number;
+      total_ingredients: number;
+    }>>(`${this.baseUrl}/${runNo}/completion-status`, {
+      headers: this.getAuthHeaders()
+    }).pipe(
+      tap(response => {
+        console.log(`🔍 DEBUG: Raw API response:`, response);
+        if (response.success && response.data) {
+          const { is_complete, incomplete_count, completed_count, total_ingredients } = response.data;
+          console.log(`📊 SERVICE: Run ${runNo} completion - ${completed_count}/${total_ingredients} complete (${incomplete_count} remaining)`);
+
+          if (is_complete) {
+            console.log(`🎉 SERVICE: Run ${runNo} is COMPLETE! All ingredients finished.`);
+          }
+        }
+      }),
+      catchError(error => {
+        console.error(`❌ SERVICE: Error checking run ${runNo} completion:`, error);
+        const errorMsg = error.error?.message || error.message || 'Failed to check run completion';
+        return throwError(() => new Error(errorMsg));
+      })
+    );
+  }
+
+  /**
+   * Update run status from NEW to PRINT when all ingredients are complete
+   * Final step in automatic run completion workflow
+   */
+  updateRunStatusToPrint(runNo: number): Observable<ApiResponse<{ oldStatus: string; newStatus: string }>> {
+    console.log(`🔄 SERVICE: Updating run ${runNo} status to PRINT`);
+
+    return this.http.put<ApiResponse<{ oldStatus: string; newStatus: string }>>(
+      `${this.baseUrl}/${runNo}/complete`,
+      {}, // Empty body - run number is in URL
+      { headers: this.getAuthHeaders() }
+    ).pipe(
+      tap(response => {
+        if (response.success) {
+          console.log(`✅ SERVICE: Run ${runNo} status successfully updated to PRINT`);
+        } else {
+          console.warn(`⚠️ SERVICE: Failed to update run ${runNo} status: ${response.message}`);
+        }
+      }),
+      catchError(error => {
+        console.error(`❌ SERVICE: Error updating run ${runNo} status to PRINT:`, error);
+        const errorMsg = error.error?.message || error.message || 'Failed to update run status';
+        return throwError(() => new Error(errorMsg));
+      })
+    );
   }
 }

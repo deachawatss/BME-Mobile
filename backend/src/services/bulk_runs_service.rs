@@ -829,4 +829,96 @@ impl BulkRunsService {
 
         Ok(revert_success)
     }
+
+    /// **NEW UNIVERSAL COMPLETION CHECK** - Get detailed run completion status
+    /// Returns comprehensive information about ingredient completion for automatic status transitions
+    pub async fn get_run_completion_status(
+        &self,
+        run_no: i32,
+    ) -> Result<RunCompletionStatus, anyhow::Error> {
+        info!("🔍 SERVICE: Getting detailed completion status for run {}", run_no);
+
+        // Use database method to get completion status directly
+        match self.database.get_run_completion_status(run_no).await {
+            Ok(completion_status) => {
+                info!("📊 SERVICE: Run {} completion status - {}/{} complete ({} incomplete)",
+                      run_no, completion_status.completed_count, completion_status.total_ingredients,
+                      completion_status.incomplete_count);
+
+                Ok(completion_status)
+            }
+            Err(e) => {
+                warn!("⚠️ SERVICE: Failed to get completion status for run {}: {}", run_no, e);
+                return Err(anyhow::anyhow!("Failed to get run completion status: {}", e));
+            }
+        }
+    }
+
+    /// **NEW AUTOMATIC STATUS UPDATE** - Update run status from NEW to PRINT
+    /// Called when all ingredients are complete to finalize the run
+    pub async fn complete_run_status(
+        &self,
+        run_no: i32,
+        user_id: &str,
+    ) -> Result<StatusUpdateResult, anyhow::Error> {
+        use crate::models::bulk_runs::StatusUpdateResult;
+
+        info!("🔄 SERVICE: Completing run {} status (NEW → PRINT) for user: {}", run_no, user_id);
+
+        // First, verify that the run is actually complete
+        let completion_status = self.get_run_completion_status(run_no).await
+            .context("Failed to verify run completion before status update")?;
+
+        if !completion_status.is_complete {
+            let error_msg = format!(
+                "Cannot complete run {} - still has {} incomplete ingredients (completed: {}/{})",
+                run_no, completion_status.incomplete_count, completion_status.completed_count, completion_status.total_ingredients
+            );
+            warn!("⚠️ SERVICE: {}", error_msg);
+            return Err(anyhow::anyhow!(error_msg));
+        }
+
+        // Get current status
+        let current_status_option = self.database
+            .get_bulk_run_status(run_no)
+            .await
+            .context("Failed to get current run status")?;
+
+        let current_status = match current_status_option {
+            Some(status) => status.status,
+            None => {
+                let error_msg = format!("Run {} not found", run_no);
+                warn!("⚠️ SERVICE: {}", error_msg);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
+
+        if current_status != "NEW" {
+            let error_msg = format!(
+                "Cannot complete run {} - current status is '{}', expected 'NEW'",
+                run_no, current_status
+            );
+            warn!("⚠️ SERVICE: {}", error_msg);
+            return Err(anyhow::anyhow!(error_msg));
+        }
+
+        // Perform the status update to PRINT
+        let update_success = self.database
+            .update_bulk_run_status(run_no, "PRINT", user_id)
+            .await
+            .context("Failed to update run status to PRINT")?;
+
+        if !update_success {
+            let error_msg = format!("Failed to update run {} status - no rows were updated", run_no);
+            warn!("⚠️ SERVICE: {}", error_msg);
+            return Err(anyhow::anyhow!(error_msg));
+        }
+
+        info!("✅ SERVICE: Successfully updated run {} status from NEW to PRINT", run_no);
+
+        Ok(StatusUpdateResult {
+            old_status: current_status,
+            new_status: "PRINT".to_string(),
+        })
+    }
 }
