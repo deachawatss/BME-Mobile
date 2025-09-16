@@ -76,6 +76,7 @@ interface ProductionRun {
     .data-cell-in-progress {
       background-color: #fff3e0 !important; /* Warm amber background - indicates activity */
       color: #f57c00 !important; /* Dark amber text - professional visibility */
+      font-weight: 900 !important; /* Extra bold text - maximum visibility on touchscreens */
     }
     
     .data-cell-completed {
