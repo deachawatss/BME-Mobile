@@ -83,10 +83,7 @@ pub struct HealthResponse {
 #[derive(Serialize)]
 pub struct DatabaseStatusResponse {
     pub success: bool,
-    pub primary_database: String,
-    pub replica_database: Option<String>,
-    pub available_databases: Vec<String>,
-    pub has_replica: bool,
+    pub database: String,
     pub timestamp: String,
 }
 
@@ -115,14 +112,11 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
-/// Database status endpoint - shows current PRIMARY_DB and REPLICA_DB configuration
+/// Database status endpoint - shows current database configuration
 async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatusResponse> {
     Json(DatabaseStatusResponse {
         success: true,
-        primary_database: state.database.get_primary_database_name().to_string(),
-        replica_database: state.database.get_replica_database_name().map(|s| s.to_string()),
-        available_databases: state.database.get_available_databases().iter().map(|s| s.to_string()).collect(),
-        has_replica: state.database.has_replica(),
+        database: state.database.get_database_name().to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -130,14 +124,14 @@ async fn database_status(State(state): State<AppState>) -> Json<DatabaseStatusRe
 /// Authentication health check endpoint - validates authentication dependencies
 async fn auth_health(State(state): State<AppState>) -> Json<AuthHealthResponse> {
     let mut issues = Vec::new();
-    let primary_db = state.database.get_primary_database_name().to_string();
+    let database_name = state.database.get_database_name().to_string();
     let ldap_enabled = state.ldap_config.enabled;
 
     // Check if tbl_user table exists
     let tbl_user_exists = match state.database.table_exists("tbl_user").await {
         Ok(exists) => {
             if !exists {
-                issues.push("Authentication table 'tbl_user' not found in primary database".to_string());
+                issues.push("Authentication table 'tbl_user' not found in database".to_string());
             }
             exists
         }
@@ -164,7 +158,7 @@ async fn auth_health(State(state): State<AppState>) -> Json<AuthHealthResponse> 
         success: issues.is_empty(),
         status: status.to_string(),
         message: message.to_string(),
-        primary_database: primary_db,
+        primary_database: database_name,
         tbl_user_exists,
         ldap_enabled,
         issues,
@@ -632,16 +626,16 @@ async fn main() {
     // Initialize database connection
     let database = database::Database::new().expect("Failed to initialize database");
 
-    // Validate authentication tables exist in primary database
-    info!("🔍 Validating authentication tables in primary database...");
+    // Validate authentication tables exist in database
+    info!("🔍 Validating authentication tables in database...");
     match database.table_exists("tbl_user").await {
         Ok(true) => {
-            info!("✅ Authentication table 'tbl_user' found in primary database");
+            info!("✅ Authentication table 'tbl_user' found in database");
         }
         Ok(false) => {
-            error!("🚨 CRITICAL: Authentication table 'tbl_user' not found in primary database!");
+            error!("🚨 CRITICAL: Authentication table 'tbl_user' not found in database!");
             error!("    This will cause SQL authentication failures for LOCAL users.");
-            error!("    Please create the tbl_user table or switch PRIMARY_DB to a database that has it.");
+            error!("    Please create the tbl_user table in the configured database.");
             panic!("Authentication table missing - cannot start server safely");
         }
         Err(e) => {

@@ -1317,78 +1317,28 @@ pub async fn revert_run_status(
         }));
     }
 
-    // Validate that the run exists and is in PRINT status first
-    match database.get_bulk_run_status(run_no).await {
-        Ok(Some(current_status)) => {
-            if current_status.status != "PRINT" {
-                warn!("⚠️ REVERT: Cannot revert run {} - current status is '{}', expected 'PRINT'", run_no, current_status.status);
-                return Ok(Json(ApiResponse {
-                    success: false,
-                    data: None,
-                    message: format!("Cannot revert run {} - current status is '{}', expected 'PRINT'", run_no, current_status.status),
-                }));
-            }
+    // Initialize service and delegate all business logic to service layer
+    let service = BulkRunsService::new(database);
+
+    match service.revert_bulk_run_status(run_no, user_id).await {
+        Ok(Some(updated_status)) => {
+            info!("✅ REVERT: Successfully reverted run {} status from PRINT to NEW", run_no);
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(updated_status),
+                message: format!("Run {} status successfully reverted from PRINT to NEW", run_no),
+            }))
         }
         Ok(None) => {
-            warn!("⚠️ REVERT: Cannot revert run {} - run not found", run_no);
-            return Ok(Json(ApiResponse {
-                success: false,
-                data: None,
-                message: format!("Cannot revert run {} - run not found", run_no),
-            }));
-        }
-        Err(e) => {
-            error!("❌ REVERT: Database error checking run status for {}: {}", run_no, e);
-            return Ok(Json(ApiResponse {
-                success: false,
-                data: None,
-                message: format!("Database error checking run status: {}", e),
-            }));
-        }
-    }
-
-    // Perform the revert operation directly through database layer
-    match database.revert_run_status_to_new(run_no, user_id).await {
-        Ok(true) => {
-            info!("✅ REVERT: Successfully reverted run {} status to NEW", run_no);
-
-            // Get the updated status to return to client
-            match database.get_bulk_run_status(run_no).await {
-                Ok(Some(updated_status)) => {
-                    Ok(Json(ApiResponse {
-                        success: true,
-                        data: Some(updated_status),
-                        message: format!("Run {} status successfully reverted from PRINT to NEW", run_no),
-                    }))
-                }
-                Ok(None) => {
-                    warn!("⚠️ REVERT: Status reverted but run {} not found in status check", run_no);
-                    Ok(Json(ApiResponse {
-                        success: true,
-                        data: None,
-                        message: "Status reverted successfully, but run status not found".to_string(),
-                    }))
-                }
-                Err(e) => {
-                    error!("❌ REVERT: Failed to get updated status after revert for run {}: {}", run_no, e);
-                    Ok(Json(ApiResponse {
-                        success: true,
-                        data: None,
-                        message: format!("Status reverted successfully, but failed to retrieve updated status: {}", e),
-                    }))
-                }
-            }
-        }
-        Ok(false) => {
-            warn!("⚠️ REVERT: Failed to revert run {} - run may not exist or not in PRINT status", run_no);
+            warn!("⚠️ REVERT: Failed to revert run {} - validation failed or no changes made", run_no);
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Cannot revert run {} - run may not exist or is not in PRINT status", run_no),
+                message: format!("Cannot revert run {} - run may not exist, not in PRINT status, or already reverted", run_no),
             }))
         }
         Err(e) => {
-            error!("❌ REVERT: Database error during status revert for run {}: {}", run_no, e);
+            error!("❌ REVERT: Service error during status revert for run {}: {}", run_no, e);
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,

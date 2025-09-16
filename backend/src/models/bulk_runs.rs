@@ -169,7 +169,7 @@ pub struct PaginatedBulkRunResponse {
     pub pagination: PaginationInfo,
 }
 
-/// Search result for run item modal display  
+/// Search result for run item modal display
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunItemSearchResult {
     pub item_key: String,
@@ -179,6 +179,7 @@ pub struct RunItemSearchResult {
     pub pack_size: String,
     pub uom: String,
     pub to_picked_bulk_qty: String, // CRITICAL: Show ToPickedBulkQty for verification
+    pub picked_bulk_qty: String,    // CRITICAL: Current picked quantity for auto-switching logic
 }
 
 /// Lot search result for lot selection modal

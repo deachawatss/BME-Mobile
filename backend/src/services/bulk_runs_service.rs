@@ -367,8 +367,12 @@ impl BulkRunsService {
         
         let mut results = Vec::new();
         for ingredient in ingredients {
-            info!("📋 DEBUG: Adding ingredient {} (LineId: {}, ToPickedBulkQty: {}) to search results", 
-                  ingredient.item_key, ingredient.line_id, ingredient.to_picked_bulk_qty);
+            let picked_qty = ingredient.picked_bulk_qty.as_ref()
+                .map(|qty| qty.to_string())
+                .unwrap_or_else(|| "0".to_string());
+
+            info!("📋 DEBUG: Adding ingredient {} (LineId: {}, ToPickedBulkQty: {}, PickedBulkQty: {}) to search results",
+                  ingredient.item_key, ingredient.line_id, ingredient.to_picked_bulk_qty, picked_qty);
             results.push(RunItemSearchResult {
                 item_key: ingredient.item_key,
                 description: ingredient.description.unwrap_or("Unknown Item".to_string()),
@@ -377,6 +381,7 @@ impl BulkRunsService {
                 pack_size: ingredient.pack_size.to_string(),
                 uom: ingredient.uom,
                 to_picked_bulk_qty: ingredient.to_picked_bulk_qty.to_string(), // CRITICAL: Include bulk picking requirement
+                picked_bulk_qty: picked_qty, // CRITICAL: Include current picked quantity for auto-switching logic
             });
         }
 
@@ -791,8 +796,9 @@ impl BulkRunsService {
 
     /// **REVERT STATUS SERVICE** - Revert bulk run status from PRINT back to NEW
     /// Used when user wants to make changes after run completion
+    /// Returns the updated status data on success, None on failure
     #[instrument(skip(self))]
-    pub async fn revert_bulk_run_status(&self, run_no: i32, user_id: &str) -> Result<bool> {
+    pub async fn revert_bulk_run_status(&self, run_no: i32, user_id: &str) -> Result<Option<crate::models::bulk_runs::BulkRunStatusResponse>> {
         info!("🔄 SERVICE: Starting status revert for run {} by user {}", run_no, user_id);
 
         // Validate that the run exists and is in PRINT status
@@ -805,14 +811,14 @@ impl BulkRunsService {
             Some(status) => status,
             None => {
                 warn!("⚠️ SERVICE: Cannot revert run {} - run not found", run_no);
-                return Ok(false);
+                return Ok(None);
             }
         };
 
         if current_status.status != "PRINT" {
             warn!("⚠️ SERVICE: Cannot revert run {} - current status is '{}', expected 'PRINT'",
                   run_no, current_status.status);
-            return Ok(false);
+            return Ok(None);
         }
 
         // Perform the actual revert operation
@@ -823,11 +829,27 @@ impl BulkRunsService {
 
         if revert_success {
             info!("✅ SERVICE: Successfully reverted run {} status from PRINT to NEW", run_no);
+
+            // Get the updated status to return
+            match self.database.get_bulk_run_status(run_no).await {
+                Ok(updated_status) => {
+                    if updated_status.is_some() {
+                        info!("✅ SERVICE: Retrieved updated status for run {}", run_no);
+                    } else {
+                        warn!("⚠️ SERVICE: Status reverted but run {} not found in status check", run_no);
+                    }
+                    Ok(updated_status)
+                }
+                Err(e) => {
+                    warn!("⚠️ SERVICE: Failed to get updated status after revert for run {}: {}", run_no, e);
+                    // Return success since the revert operation succeeded, even if we can't fetch the updated status
+                    Ok(None)
+                }
+            }
         } else {
             warn!("⚠️ SERVICE: Failed to revert run {} status - no rows were updated", run_no);
+            Ok(None)
         }
-
-        Ok(revert_success)
     }
 
     /// **NEW UNIVERSAL COMPLETION CHECK** - Get detailed run completion status

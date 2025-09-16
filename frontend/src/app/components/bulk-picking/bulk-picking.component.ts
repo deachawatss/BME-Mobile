@@ -3550,17 +3550,44 @@ export class BulkPickingComponent implements AfterViewInit {
     }
     
     // Get next unpicked ingredient from run
-    this.bulkRunsService.searchRunItems(runNumber).subscribe({
+    console.log(`🔄 AUTO_SWITCH: Calling searchRunItems for run ${runNumber} to find ingredients after completing ${currentIngredient}`);
+
+    // Add a small delay to ensure database changes are committed before querying
+    setTimeout(() => {
+      this.bulkRunsService.searchRunItems(runNumber).subscribe({
       next: (ingredients) => {
+        // Enhanced debug logging to verify API data
+        console.log(`📡 AUTO_SWITCH_API_DATA: searchRunItems returned ${ingredients.data?.length || 0} ingredients:`,
+          ingredients.data?.map(item => ({
+            item_key: item.item_key,
+            line_id: item.line_id,
+            picked_bulk_qty: item.picked_bulk_qty,
+            to_picked_bulk_qty: item.to_picked_bulk_qty,
+            description: item.description
+          }))
+        );
+
         // Filter out current ingredient and find next unpicked one
-        const availableIngredients = ingredients.data?.filter((item: any) => 
+        const availableIngredients = ingredients.data?.filter((item: any) =>
           item.item_key !== currentIngredient && this.isIngredientUnpicked(item)
         ) || [];
         
         if (availableIngredients.length > 0) {
-          // Sort by LineId to follow BME4 order (22→21→1→2...)
+          // Enhanced logging for debugging duplicate LineId issues
+          console.log(`🔍 AUTO_SWITCH_DEBUG: Found ${availableIngredients.length} available ingredients:`,
+            availableIngredients.map(item => ({
+              item_key: item.item_key,
+              line_id: item.line_id,
+              description: item.description,
+              isUnpicked: this.isIngredientUnpicked(item)
+            }))
+          );
+
+          // Sort by LineId to follow BME4 order (22→21→1→2...) with secondary ItemKey sorting for tie-breaking
           availableIngredients.sort((a: any, b: any) => {
-            return parseInt(b.line_id) - parseInt(a.line_id); // Descending order
+            const lineIdDiff = parseInt(b.line_id) - parseInt(a.line_id); // Primary: LineId DESC
+            if (lineIdDiff !== 0) return lineIdDiff;
+            return a.item_key.localeCompare(b.item_key); // Secondary: ItemKey ASC for deterministic duplicate LineId handling
           });
           
           const nextIngredient = availableIngredients[0];
@@ -3571,10 +3598,11 @@ export class BulkPickingComponent implements AfterViewInit {
           this.showCompletionMessage();
         }
       },
-      error: (error) => {
-        console.error('Failed to get ingredients for switching:', error);
-      }
-    });
+        error: (error) => {
+          console.error('Failed to get ingredients for switching:', error);
+        }
+      });
+    }, 200); // 200ms delay to ensure database changes are committed
   }
   
   // Check if current ingredient is completed and auto-switch if needed
@@ -3980,9 +4008,21 @@ export class BulkPickingComponent implements AfterViewInit {
   private isIngredientUnpicked(ingredient: any): boolean {
     const pickedQty = parseFloat(ingredient.picked_bulk_qty || '0');
     const totalQty = parseFloat(ingredient.to_picked_bulk_qty || '0');
-    
+    const isUnpicked = totalQty > 0 && pickedQty < totalQty;
+
+    // Enhanced debug logging for pallet allocation investigation
+    console.log(`🔍 INGREDIENT_FILTER_DEBUG: ${ingredient.item_key}:`, {
+      picked_bulk_qty: pickedQty,
+      to_picked_bulk_qty: totalQty,
+      isUnpicked: isUnpicked,
+      rawData: {
+        picked_bulk_qty_raw: ingredient.picked_bulk_qty,
+        to_picked_bulk_qty_raw: ingredient.to_picked_bulk_qty
+      }
+    });
+
     // Ingredient is available for picking if it has bulk picking requirement and is not fully picked
-    return totalQty > 0 && pickedQty < totalQty;
+    return isUnpicked;
   }
   
   // Schedule a timeout to clear manual selection flag if no progress is made

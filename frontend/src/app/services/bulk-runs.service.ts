@@ -192,6 +192,8 @@ export interface RunItemSearchResult {
   line_id: number;
   pack_size: string;
   uom: string;
+  to_picked_bulk_qty: string;  // Total required quantity
+  picked_bulk_qty: string;     // Current picked quantity for auto-switching logic
 }
 
 // Lot search modal models
@@ -729,7 +731,9 @@ export class BulkRunsService {
     this.isLoading.set(true);
     this.errorMessage.set(null);
 
-    return this.http.get<ApiResponse<RunItemSearchResult[]>>(`${this.baseUrl}/${runNo}/search-items`)
+    // Add cache-busting timestamp to ensure fresh data for auto-switching
+    const timestamp = Date.now();
+    return this.http.get<ApiResponse<RunItemSearchResult[]>>(`${this.baseUrl}/${runNo}/search-items?t=${timestamp}`)
       .pipe(
         tap(response => {
           this.isLoading.set(false);
