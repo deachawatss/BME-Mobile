@@ -253,6 +253,7 @@ interface ProductionRun {
                         autocomplete="off">
                       <button
                         type="button"
+                        (mousedown)="onSearchButtonMouseDown()"
                         (click)="searchRun()"
                         class="search-btn"
                         [disabled]="isSearchingRun()"
@@ -1635,6 +1636,7 @@ export class BulkPickingComponent implements AfterViewInit {
   // Run field interaction state for click-to-clear functionality
   private previousRunValue: string = '';
   private runFieldClicked: boolean = false;
+  private searchButtonClicked: boolean = false;
   searchResults = signal<BulkRunSearchResponse[]>([]);
   errorMessage = signal<string | null>(null);
   
@@ -1822,6 +1824,14 @@ export class BulkPickingComponent implements AfterViewInit {
 
   onRunFieldBlur(): void {
     const currentValue = this.productionForm.get('runNumber')?.value?.trim();
+
+    // Skip restoration if user is clicking search button
+    if (this.searchButtonClicked) {
+      this.runFieldClicked = false;
+      this.previousRunValue = '';
+      return;
+    }
+
     if (this.runFieldClicked && !currentValue) {
       this.productionForm.get('runNumber')?.setValue(this.previousRunValue);
     }
@@ -1829,10 +1839,19 @@ export class BulkPickingComponent implements AfterViewInit {
     this.previousRunValue = '';
   }
 
+  onSearchButtonMouseDown(): void {
+    this.searchButtonClicked = true;
+  }
+
   // Search functions
   searchRun(): void {
     const runNumber = this.productionForm.get('runNumber')?.value?.trim();
-    
+
+    // Reset all field interaction states since user is taking action
+    this.searchButtonClicked = false;
+    this.runFieldClicked = false;
+    this.previousRunValue = '';
+
     // Story 1.1.1: Show modal if run number field is blank
     if (!runNumber) {
       this.openRunSelectionModal();
