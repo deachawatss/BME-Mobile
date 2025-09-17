@@ -1502,13 +1502,20 @@ interface ProductionRun {
 
                 <!-- Pending to Picked Tab -->
                 <div *ngIf="activePickedLotsTab() === 'pending'">
+                  <!-- Explanatory text -->
+                  <div class="tw-mb-4 tw-p-3 tw-bg-blue-50 tw-border tw-border-blue-200 tw-rounded-lg">
+                    <p class="tw-text-sm tw-text-blue-700">
+                      <strong>Batch Status Overview:</strong> Shows remaining weight (in KG) that still needs to be picked for each batch.
+                      Completed batches show 0.00 KG remaining.
+                    </p>
+                  </div>
                   <div class="tw-overflow-x-auto">
                     <table class="tw-min-w-full tw-divide-y tw-divide-gray-200">
                       <thead class="tw-bg-gray-50">
                         <tr>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Batch No</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Item Key</th>
-                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">To Picked Bulk Qty</th>
+                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Remaining Weight (KG)</th>
                         </tr>
                       </thead>
                       <tbody class="tw-bg-white tw-divide-y tw-divide-gray-200">
