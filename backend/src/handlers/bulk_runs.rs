@@ -335,7 +335,7 @@ pub async fn check_run_completion_status(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(completion_status),
-                message: format!("Completion status retrieved for run {}", run_no),
+                message: format!("Completion status retrieved for run {run_no}"),
             }))
         }
         Err(e) => {
@@ -343,7 +343,7 @@ pub async fn check_run_completion_status(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Failed to check run completion status: {}", e),
+                message: format!("Failed to check run completion status: {e}"),
             }))
         }
     }
@@ -377,7 +377,7 @@ pub async fn complete_run_status(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(status_result),
-                message: format!("Run {} status successfully updated to PRINT", run_no),
+                message: format!("Run {run_no} status successfully updated to PRINT"),
             }))
         }
         Err(e) => {
@@ -385,7 +385,7 @@ pub async fn complete_run_status(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Failed to update run status: {}", e),
+                message: format!("Failed to update run status: {e}"),
             }))
         }
     }
@@ -405,7 +405,7 @@ pub async fn get_run_status(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(status_response),
-                message: format!("Run {} status retrieved", run_no),
+                message: format!("Run {run_no} status retrieved"),
             }))
         }
         Ok(None) => {
@@ -413,7 +413,7 @@ pub async fn get_run_status(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Run {} not found", run_no),
+                message: format!("Run {run_no} not found"),
             }))
         }
         Err(e) => {
@@ -764,7 +764,7 @@ pub async fn get_inventory_alerts(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Failed to get inventory alerts: {}", e),
+                message: format!("Failed to get inventory alerts: {e}"),
             }))
         }
     }
@@ -1061,7 +1061,7 @@ pub async fn get_picked_lots(
                 message: if lot_count == 0 {
                     "No picked lots found for this ingredient".to_string()
                 } else {
-                    format!("Found {} picked lot(s)", lot_count)
+                    format!("Found {lot_count} picked lot(s)")
                 },
             }))
         }
@@ -1098,7 +1098,7 @@ pub async fn get_all_picked_lots_for_run(
                 message: if lot_count == 0 {
                     "No picked lots found for this run".to_string()
                 } else {
-                    format!("Found {} picked lot(s) across all ingredients", lot_count)
+                    format!("Found {lot_count} picked lot(s) across all ingredients")
                 },
             }))
         }
@@ -1134,14 +1134,14 @@ pub async fn unpick_ingredient(
             Ok(result) => Ok(Json(ApiResponse {
                 success: true,
                 data: Some(result),
-                message: format!("Successfully unpicked record with LotTranNo {}", lot_tran_no),
+                message: format!("Successfully unpicked record with LotTranNo {lot_tran_no}"),
             })),
             Err(e) => {
                 error!("❌ Failed to unpick LotTranNo {}: {}", lot_tran_no, e);
                 Ok(Json(ApiResponse {
                     success: false,
                     data: Some(serde_json::json!({"error": e.to_string()})),
-                    message: format!("Failed to unpick LotTranNo {}: {}", lot_tran_no, e),
+                    message: format!("Failed to unpick LotTranNo {lot_tran_no}: {e}"),
                 }))
             }
         }
@@ -1153,14 +1153,14 @@ pub async fn unpick_ingredient(
                     Ok(result) => Ok(Json(ApiResponse {
                         success: true,
                         data: Some(result),
-                        message: format!("Successfully unpicked lot {}", lot_no),
+                        message: format!("Successfully unpicked lot {lot_no}"),
                     })),
                     Err(e) => {
                         error!("❌ Failed to unpick lot {}: {}", lot_no, e);
                         Ok(Json(ApiResponse {
                             success: false,
                             data: Some(serde_json::json!({"error": e.to_string()})),
-                            message: format!("Failed to unpick lot {}: {}", lot_no, e),
+                            message: format!("Failed to unpick lot {lot_no}: {e}"),
                         }))
                     }
                 }
@@ -1178,7 +1178,7 @@ pub async fn unpick_ingredient(
                         Ok(Json(ApiResponse {
                             success: false,
                             data: Some(serde_json::json!({"error": e.to_string()})),
-                            message: format!("Failed to unpick batch: {}", e),
+                            message: format!("Failed to unpick batch: {e}"),
                         }))
                     }
                 }
@@ -1211,7 +1211,7 @@ pub async fn unpick_all_run_lots(
             Ok(Json(ApiResponse {
                 success: false,
                 data: Some(serde_json::json!({"error": e.to_string()})),
-                message: format!("Failed to unpick all run lots: {}", e),
+                message: format!("Failed to unpick all run lots: {e}"),
             }))
         }
     }
@@ -1246,7 +1246,7 @@ pub async fn get_batch_weight_summary(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(response),
-                message: format!("Found {} batch items for run {}", total_items, run_no),
+                message: format!("Found {total_items} batch items for run {run_no}"),
             }))
         }
         Err(e) => {
@@ -1275,7 +1275,7 @@ pub async fn get_run_lot_details(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(lot_details),
-                message: format!("Found {} lot picking details for run {}", count, run_no),
+                message: format!("Found {count} lot picking details for run {run_no}"),
             }))
         }
         Err(e) => {
@@ -1283,7 +1283,7 @@ pub async fn get_run_lot_details(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Failed to get lot picking details: {}", e),
+                message: format!("Failed to get lot picking details: {e}"),
             }))
         }
     }
@@ -1326,7 +1326,7 @@ pub async fn revert_run_status(
             Ok(Json(ApiResponse {
                 success: true,
                 data: Some(updated_status),
-                message: format!("Run {} status successfully reverted from PRINT to NEW", run_no),
+                message: format!("Run {run_no} status successfully reverted from PRINT to NEW"),
             }))
         }
         Ok(None) => {
@@ -1334,7 +1334,7 @@ pub async fn revert_run_status(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Cannot revert run {} - run may not exist, not in PRINT status, or already reverted", run_no),
+                message: format!("Cannot revert run {run_no} - run may not exist, not in PRINT status, or already reverted"),
             }))
         }
         Err(e) => {
@@ -1342,7 +1342,7 @@ pub async fn revert_run_status(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: format!("Database error during status revert: {}", e),
+                message: format!("Database error during status revert: {e}"),
             }))
         }
     }

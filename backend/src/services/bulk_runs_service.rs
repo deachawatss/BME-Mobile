@@ -870,7 +870,7 @@ impl BulkRunsService {
             }
             Err(e) => {
                 warn!("⚠️ SERVICE: Failed to get completion status for run {}: {}", run_no, e);
-                return Err(anyhow::anyhow!("Failed to get run completion status: {}", e));
+                Err(anyhow::anyhow!("Failed to get run completion status: {e}"))
             }
         }
     }
@@ -908,7 +908,7 @@ impl BulkRunsService {
         let current_status = match current_status_option {
             Some(status) => status.status,
             None => {
-                let error_msg = format!("Run {} not found", run_no);
+                let error_msg = format!("Run {run_no} not found");
                 warn!("⚠️ SERVICE: {}", error_msg);
                 return Err(anyhow::anyhow!(error_msg));
             }
@@ -916,8 +916,7 @@ impl BulkRunsService {
 
         if current_status != "NEW" {
             let error_msg = format!(
-                "Cannot complete run {} - current status is '{}', expected 'NEW'",
-                run_no, current_status
+                "Cannot complete run {run_no} - current status is '{current_status}', expected 'NEW'"
             );
             warn!("⚠️ SERVICE: {}", error_msg);
             return Err(anyhow::anyhow!(error_msg));
@@ -930,7 +929,7 @@ impl BulkRunsService {
             .context("Failed to update run status to PRINT")?;
 
         if !update_success {
-            let error_msg = format!("Failed to update run {} status - no rows were updated", run_no);
+            let error_msg = format!("Failed to update run {run_no} status - no rows were updated");
             warn!("⚠️ SERVICE: {}", error_msg);
             return Err(anyhow::anyhow!(error_msg));
         }

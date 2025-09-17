@@ -98,7 +98,7 @@ fn extract_username_from_jwt_payload(token: &str) -> Option<String> {
             // Extract username with priority: username field > user_id field > sub field
             let extracted_user = claims.username
                 .or(claims.user_id)
-                .or_else(|| {
+                .or({
                     if !claims.sub.is_empty() {
                         Some(claims.sub)
                     } else {

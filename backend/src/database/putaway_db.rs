@@ -7,6 +7,7 @@ use crate::utils::bangkok_now;
 use anyhow::Result;
 use chrono::{DateTime, NaiveDateTime, Utc};
 
+
 pub struct PutawayDatabase {
     db: Database,
 }
@@ -217,6 +218,7 @@ impl PutawayDatabase {
     }
 
     /// Execute complete bin transfer transaction with lot consolidation
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_bin_transfer_transaction(
         &self,
         lot_no: &str,
@@ -472,6 +474,7 @@ impl PutawayDatabase {
     }
 
     /// Handle lot consolidation logic for LotMaster records
+    #[allow(clippy::too_many_arguments)]
     async fn handle_lot_consolidation(
         &self,
         client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,

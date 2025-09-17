@@ -137,7 +137,7 @@ async fn auth_health(State(state): State<AppState>) -> Json<AuthHealthResponse> 
             exists
         }
         Err(e) => {
-            issues.push(format!("Failed to check authentication table: {}", e));
+            issues.push(format!("Failed to check authentication table: {e}"));
             false
         }
     };
@@ -175,8 +175,8 @@ async fn auth_status(
     // Check for Authorization header
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                let token = &auth_str[7..]; // Remove "Bearer " prefix
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                // Remove "Bearer " prefix
                 
                 // Validate the JWT token
                 match state.auth_service.verify_token(token) {
@@ -440,7 +440,7 @@ async fn authenticate_ldap(
         User {
             user_id: clean_username.clone(),
             username: clean_username.clone(),
-            email: format!("{}@nwfth.com", clean_username),
+            email: format!("{clean_username}@nwfth.com"),
             display_name,
             is_active: true,
         }
@@ -464,7 +464,7 @@ async fn authenticate_ldap(
         User {
             user_id: clean_username.clone(),
             username: clean_username.clone(),
-            email: format!("{}@nwfth.com", clean_username),
+            email: format!("{clean_username}@nwfth.com"),
             display_name,
             is_active: true,
         }
@@ -517,7 +517,7 @@ async fn authenticate_sql(
             Ok(User {
                 user_id: username.to_string(),
                 username: username.to_string(),
-                email: format!("{}@nwfth.com", username),
+                email: format!("{username}@nwfth.com"),
                 display_name,
                 is_active: true,
             })
@@ -553,7 +553,7 @@ async fn handle_spa_or_static(State(state): State<AppState>, uri: axum::http::Ur
 
         match tokio::fs::read(&file_path).await {
             Ok(content) => {
-                let content_type = match path.split('.').last().unwrap_or("") {
+                let content_type = match path.split('.').next_back().unwrap_or("") {
                     "js" => "application/javascript",
                     "css" => "text/css",
                     "html" => "text/html",
@@ -582,7 +582,7 @@ async fn handle_spa_or_static(State(state): State<AppState>, uri: axum::http::Ur
 }
 
 async fn serve_index_html(static_assets_path: &str) -> impl IntoResponse {
-    let index_path = format!("{}/index.html", static_assets_path);
+    let index_path = format!("{static_assets_path}/index.html");
 
     match tokio::fs::read_to_string(&index_path).await {
         Ok(content) => {
@@ -722,7 +722,6 @@ async fn main() {
         .route("/api/auth/health", get(auth_health))
         .route("/api/auth/login", post(login))
         .route("/api/auth/status", get(auth_status))
-        .with_state(state.clone())
         // Bulk runs routes with Database state and JWT protection
         .nest(
             "/api/bulk-runs",
@@ -734,36 +733,36 @@ async fn main() {
                 )
                 .route("/search", get(bulk_runs::search_bulk_runs))
                 .route("/available", get(bulk_runs::get_available_runs))
-                .route("/:run_no/form-data", get(bulk_runs::get_bulk_run_form_data))
+                .route("/{run_no}/form-data", get(bulk_runs::get_bulk_run_form_data))
                 .route(
-                    "/:run_no/next-ingredient",
+                    "/{run_no}/next-ingredient",
                     get(bulk_runs::get_next_ingredient),
                 )
-                .route("/:run_no/completion", get(bulk_runs::check_run_completion))
-                .route("/:run_no/completion-status", get(bulk_runs::check_run_completion_status))
-                .route("/:run_no/complete", put(bulk_runs::complete_run_status))
-                .route("/:run_no/status", get(bulk_runs::get_run_status))
-                .route("/:run_no/search-items", get(bulk_runs::search_run_items))
-                .route("/:run_no/ingredient-index", get(bulk_runs::get_ingredient_index))
-                .route("/:run_no/ingredient-by-coordinates", get(bulk_runs::get_ingredient_by_coordinates))
-                .route("/:run_no/lots/search", get(bulk_runs::search_run_lots))
-                .route("/:run_no/lots/:lot_no/bins", get(bulk_runs::get_lot_bins))
-                .route("/:run_no/pallets", get(bulk_runs::get_pallet_tracking_data))
-                .route("/:run_no/confirm-pick", post(bulk_runs::confirm_pick))
-                .route("/:run_no/debug-validation", post(bulk_runs::debug_validation))
-                .route("/:run_no/pallet/:row_num/:line_id/completion", get(bulk_runs::check_pallet_completion))
-                .route("/:run_no/pallet/:row_num/:line_id/next", get(bulk_runs::get_next_pallet))
+                .route("/{run_no}/completion", get(bulk_runs::check_run_completion))
+                .route("/{run_no}/completion-status", get(bulk_runs::check_run_completion_status))
+                .route("/{run_no}/complete", put(bulk_runs::complete_run_status))
+                .route("/{run_no}/status", get(bulk_runs::get_run_status))
+                .route("/{run_no}/search-items", get(bulk_runs::search_run_items))
+                .route("/{run_no}/ingredient-index", get(bulk_runs::get_ingredient_index))
+                .route("/{run_no}/ingredient-by-coordinates", get(bulk_runs::get_ingredient_by_coordinates))
+                .route("/{run_no}/lots/search", get(bulk_runs::search_run_lots))
+                .route("/{run_no}/lots/{lot_no}/bins", get(bulk_runs::get_lot_bins))
+                .route("/{run_no}/pallets", get(bulk_runs::get_pallet_tracking_data))
+                .route("/{run_no}/confirm-pick", post(bulk_runs::confirm_pick))
+                .route("/{run_no}/debug-validation", post(bulk_runs::debug_validation))
+                .route("/{run_no}/pallet/{row_num}/{line_id}/completion", get(bulk_runs::check_pallet_completion))
+                .route("/{run_no}/pallet/{row_num}/{line_id}/next", get(bulk_runs::get_next_pallet))
                 .route(
-                    "/inventory/:item_key/alerts",
+                    "/inventory/{item_key}/alerts",
                     get(bulk_runs::get_inventory_alerts),
                 )
-                .route("/:run_no/:row_num/:line_id/picked-lots", get(bulk_runs::get_picked_lots))
-                .route("/:run_no/all-picked-lots", get(bulk_runs::get_all_picked_lots_for_run))
-                .route("/:run_no/batch-weight-summary", get(bulk_runs::get_batch_weight_summary))
-                .route("/:run_no/lot-details", get(bulk_runs::get_run_lot_details))
-                .route("/:run_no/:row_num/:line_id/unpick", post(bulk_runs::unpick_ingredient))
-                .route("/:run_no/unpick-all", post(bulk_runs::unpick_all_run_lots))
-                .route("/:run_no/revert-status", post(bulk_runs::revert_run_status))
+                .route("/{run_no}/{row_num}/{line_id}/picked-lots", get(bulk_runs::get_picked_lots))
+                .route("/{run_no}/all-picked-lots", get(bulk_runs::get_all_picked_lots_for_run))
+                .route("/{run_no}/batch-weight-summary", get(bulk_runs::get_batch_weight_summary))
+                .route("/{run_no}/lot-details", get(bulk_runs::get_run_lot_details))
+                .route("/{run_no}/{row_num}/{line_id}/unpick", post(bulk_runs::unpick_ingredient))
+                .route("/{run_no}/unpick-all", post(bulk_runs::unpick_all_run_lots))
+                .route("/{run_no}/revert-status", post(bulk_runs::revert_run_status))
                 .route("/health", get(bulk_runs::bulk_runs_health))
                 .layer(from_fn_with_state(state.clone(), jwt_auth_middleware))
                 .with_state(state.database.clone()),
@@ -773,12 +772,13 @@ async fn main() {
             "/api/putaway",
             putaway::create_putaway_routes()
                 .layer(from_fn_with_state(state.clone(), jwt_auth_middleware))
-                .with_state(state.database),
+                .with_state(state.database.clone()),
         )
         // Serve static files from Angular dist
         .nest_service("/assets", ServeDir::new("../frontend/dist/frontend/browser/assets"))
         .fallback(handle_spa_or_static)
-        .layer(cors);
+        .layer(cors)
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&format!("{host}:{port}"))
         .await

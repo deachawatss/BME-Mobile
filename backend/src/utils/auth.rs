@@ -129,7 +129,7 @@ impl AuthService {
             user_id: user_id.to_string(),
             username: username.to_string(),
             email: if email.is_empty() {
-                format!("{}@nwfth.com", username)
+                format!("{username}@nwfth.com")
             } else {
                 email.to_string()
             },
@@ -143,7 +143,7 @@ impl AuthService {
         User {
             user_id: username.to_string(),
             username: username.to_string(),
-            email: format!("{}@nwfth.com", username),
+            email: format!("{username}@nwfth.com"),
             display_name: username.to_string(),
             is_active: true,
         }

@@ -1140,9 +1140,7 @@ impl Database {
                 BinPriority DESC,              -- A-zone first, then K-zone
                 (l.QtyOnHand - l.QtyCommitSales) ASC,    -- Smaller available quantity first
                 l.LotNo ASC                    -- Consistent ordering
-        "#,
-            run_no = run_no,
-            item_key = item_key
+        "#
         );
 
         let select = TiberiusQuery::new(&query);
@@ -3208,7 +3206,7 @@ impl Database {
             alerts.push(InventoryAlert {
                 alert_type: InventoryAlertType::OutOfStock,
                 item_key: item_key.to_string(),
-                message: format!("Item {} is out of stock", item_key),
+                message: format!("Item {item_key} is out of stock"),
                 severity: AlertSeverity::Critical,
                 recommended_action: Some("Check alternative items or contact purchasing".to_string()),
             });
@@ -3298,7 +3296,7 @@ impl Database {
         line_id: i32,
     ) -> Result<PickedLotsResponse, anyhow::Error> {
         let mut client = self.get_client().await
-            .with_context(|| format!("Failed to connect to database for picked lots query - run: {}, row: {}, line: {}", run_no, row_num, line_id))?;
+            .with_context(|| format!("Failed to connect to database for picked lots query - run: {run_no}, row: {row_num}, line: {line_id}"))?;
 
         info!("🔍 DEBUG: Getting picked lots for run: {}, row: {}, line: {}", run_no, row_num, line_id);
 
@@ -3394,14 +3392,14 @@ impl Database {
                   lot_tran_no, lot_no, bin_no, batch_no, item_key, location_key, alloc_lot_qty);
 
             let picked_lot = PickedLot {
-                lot_tran_no: lot_tran_no,
+                lot_tran_no,
                 lot_no: lot_no.to_string(),
                 bin_no: bin_no.to_string(),
                 batch_no: batch_no.to_string(),
                 item_key: item_key.to_string(),
                 location_key: location_key.to_string(),
-                row_num: row_num,
-                line_id: line_id,
+                row_num,
+                line_id,
                 date_exp: date_exp.map(|dt| chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc)),
                 qty_received: BigDecimal::from_f64(qty_received).unwrap_or_default(),
                 alloc_lot_qty: BigDecimal::from_f64(alloc_lot_qty).unwrap_or_default(),
@@ -3548,7 +3546,7 @@ impl Database {
         run_no: i32,
     ) -> Result<PickedLotsResponse, anyhow::Error> {
         let mut client = self.get_client().await
-            .with_context(|| format!("Failed to connect to database for all picked lots query - run: {}", run_no))?;
+            .with_context(|| format!("Failed to connect to database for all picked lots query - run: {run_no}"))?;
 
         info!("🔍 DEBUG: Getting ALL picked lots for entire run: {}", run_no);
 
@@ -3617,14 +3615,14 @@ impl Database {
                   lot_tran_no, lot_no, bin_no, batch_no, item_key, location_key, alloc_lot_qty);
 
             let picked_lot = PickedLot {
-                lot_tran_no: lot_tran_no,
+                lot_tran_no,
                 lot_no: lot_no.to_string(),
                 bin_no: bin_no.to_string(),
                 batch_no: batch_no.to_string(),
                 item_key: item_key.to_string(),
                 location_key: location_key.to_string(),
-                row_num: row_num,
-                line_id: line_id,
+                row_num,
+                line_id,
                 date_exp: date_exp.map(|dt| chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc)),
                 qty_received: BigDecimal::from_f64(qty_received).unwrap_or_default(),
                 alloc_lot_qty: BigDecimal::from_f64(alloc_lot_qty).unwrap_or_default(),
@@ -3744,16 +3742,16 @@ impl Database {
         let check_allocations_query = if let Some(lot) = specific_lot {
             format!(r#"
                 SELECT COUNT(*) as AllocationCount
-                FROM Cust_BulkLotPicked 
-                WHERE RunNo = {} AND RowNum = {} AND LineId = {} AND LotNo = '{}'
-            "#, run_no, row_num, line_id, lot)
+                FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
+            "#)
         } else {
             // For batch unpick, check ALL allocation records for this ingredient (LineId) across all batches (RowNums)
             format!(r#"
                 SELECT COUNT(*) as AllocationCount
-                FROM Cust_BulkLotPicked 
-                WHERE RunNo = {} AND LineId = {}
-            "#, run_no, line_id)
+                FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
         };
 
         let stream = client.simple_query(&check_allocations_query).await
@@ -3793,12 +3791,12 @@ impl Database {
                        STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
                 FROM LotTransaction lt
                 WHERE EXISTS (
-                    SELECT 1 FROM Cust_BulkLotPicked blp 
-                    WHERE blp.RunNo = {} AND blp.RowNum = {} AND blp.LineId = {} 
-                    AND blp.LotNo = '{}' AND lt.IssueDocNo = blp.BatchNo
-                ) AND lt.LotNo = '{}' AND lt.TransactionType = 5 AND lt.User5 = 'Picking Customization'
+                    SELECT 1 FROM Cust_BulkLotPicked blp
+                    WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
+                    AND blp.LotNo = '{lot}' AND lt.IssueDocNo = blp.BatchNo
+                ) AND lt.LotNo = '{lot}' AND lt.TransactionType = 5 AND lt.User5 = 'Picking Customization'
                 GROUP BY lt.LotNo, lt.ItemKey, lt.BinNo
-            "#, run_no, row_num, line_id, lot, lot)
+            "#)
         } else {
             // For batch unpick, get ALL actual issued quantities for this ingredient (LineId) across all batches (RowNums)
             format!(r#"
@@ -3807,12 +3805,12 @@ impl Database {
                        STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
                 FROM LotTransaction lt
                 WHERE EXISTS (
-                    SELECT 1 FROM Cust_BulkLotPicked blp 
-                    WHERE blp.RunNo = {} AND blp.LineId = {} 
+                    SELECT 1 FROM Cust_BulkLotPicked blp
+                    WHERE blp.RunNo = {run_no} AND blp.LineId = {line_id}
                     AND lt.IssueDocNo = blp.BatchNo
                 ) AND lt.TransactionType = 5 AND lt.User5 = 'Picking Customization'
                 GROUP BY lt.LotNo, lt.ItemKey, lt.BinNo
-            "#, run_no, line_id)
+            "#)
         };
 
         let stream = client.simple_query(&get_issued_quantities_query).await
@@ -3854,15 +3852,15 @@ impl Database {
         // Step 2: Delete allocation records (official app pattern)
         let delete_allocations_query = if let Some(lot) = specific_lot {
             format!(r#"
-                DELETE FROM Cust_BulkLotPicked 
-                WHERE RunNo = {} AND RowNum = {} AND LineId = {} AND LotNo = '{}'
-            "#, run_no, row_num, line_id, lot)
+                DELETE FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
+            "#)
         } else {
             // For batch unpick, delete ALL allocations for this ingredient (LineId) across all batches (RowNums)
             format!(r#"
-                DELETE FROM Cust_BulkLotPicked 
-                WHERE RunNo = {} AND LineId = {}
-            "#, run_no, line_id)
+                DELETE FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
         };
 
         client.simple_query(&delete_allocations_query).await
@@ -3872,15 +3870,15 @@ impl Database {
         // Step 3: Clean up pallet traceability records (mobile app only)
         let delete_pallet_query = if let Some(_lot) = specific_lot {
             format!(r#"
-                DELETE FROM Cust_BulkPalletLotPicked 
-                WHERE RunNo = {} AND RowNum = {} AND LineId = {}
-            "#, run_no, row_num, line_id) // Note: no lot-specific filter in this table
+                DELETE FROM Cust_BulkPalletLotPicked
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
+            "#) // Note: no lot-specific filter in this table
         } else {
             // For batch unpick, delete ALL pallet records for this ingredient (LineId) across all batches (RowNums)
             format!(r#"
-                DELETE FROM Cust_BulkPalletLotPicked 
-                WHERE RunNo = {} AND LineId = {}
-            "#, run_no, line_id)
+                DELETE FROM Cust_BulkPalletLotPicked
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
         };
 
         client.simple_query(&delete_pallet_query).await
@@ -3892,16 +3890,16 @@ impl Database {
         if !lot_rollbacks.is_empty() {
             for (lot_no, item_key, bin_no, actual_issued) in &lot_rollbacks {
                 let rollback_query = format!(r#"
-                    UPDATE LotMaster 
-                    SET QtyCommitSales = CASE 
-                        WHEN QtyCommitSales - {} < 0 THEN 0 
-                        ELSE QtyCommitSales - {} 
+                    UPDATE LotMaster
+                    SET QtyCommitSales = CASE
+                        WHEN QtyCommitSales - {actual_issued} < 0 THEN 0
+                        ELSE QtyCommitSales - {actual_issued}
                     END
-                    WHERE ItemKey = '{}' AND LotNo = '{}' AND BinNo = '{}'
-                "#, actual_issued, actual_issued, item_key, lot_no, bin_no);
+                    WHERE ItemKey = '{item_key}' AND LotNo = '{lot_no}' AND BinNo = '{bin_no}'
+                "#);
 
                 client.simple_query(&rollback_query).await
-                    .with_context(|| format!("Failed to rollback inventory for lot {} bin {}", lot_no, bin_no))?;
+                    .with_context(|| format!("Failed to rollback inventory for lot {lot_no} bin {bin_no}"))?;
                 info!("✅ Rolled back {} qty for lot {} item {} bin {} (with safety check)", actual_issued, lot_no, item_key, bin_no);
             }
         } else {
@@ -3916,39 +3914,35 @@ impl Database {
                 format!(r#"
                     UPDATE cust_BulkPicked
                     SET PickedBulkQty = CASE
-                        WHEN PickedBulkQty - {} <= 0 THEN 0
-                        ELSE PickedBulkQty - {}
+                        WHEN PickedBulkQty - {total_qty_to_rollback} <= 0 THEN 0
+                        ELSE PickedBulkQty - {total_qty_to_rollback}
                     END,
                     PickedQty = CASE
-                        WHEN PickedBulkQty - {} <= 0 THEN 0
-                        ELSE (PickedBulkQty - {}) * PackSize
+                        WHEN PickedBulkQty - {total_qty_to_rollback} <= 0 THEN 0
+                        ELSE (PickedBulkQty - {total_qty_to_rollback}) * PackSize
                     END,
                     ItemBatchStatus = CASE
-                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        WHEN PickedBulkQty - {total_qty_to_rollback} <= 0 THEN NULL
                         ELSE 'Allocated'
                     END,
                     PickingDate = CASE
-                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        WHEN PickedBulkQty - {total_qty_to_rollback} <= 0 THEN NULL
                         ELSE PickingDate
                     END,
                     ModifiedBy = CASE
-                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        WHEN PickedBulkQty - {total_qty_to_rollback} <= 0 THEN NULL
                         ELSE ModifiedBy
                     END
-                    WHERE RunNo = {} AND RowNum = {} AND LineId = {}
-                "#, total_qty_to_rollback, total_qty_to_rollback,
-                    total_qty_to_rollback, total_qty_to_rollback,
-                    total_qty_to_rollback, total_qty_to_rollback,
-                    total_qty_to_rollback,
-                    run_no, row_num, line_id)
+                    WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
+                "#)
             } else {
                 // Fallback: Reset specific row only when no rollback quantity found
                 format!(r#"
                     UPDATE cust_BulkPicked
                     SET PickedBulkQty = 0, PickedQty = 0,
                         ItemBatchStatus = NULL, PickingDate = NULL, ModifiedBy = NULL
-                    WHERE RunNo = {} AND RowNum = {} AND LineId = {}
-                "#, run_no, row_num, line_id)
+                    WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
+                "#)
             }
         } else {
             // For entire ingredient unpick, reset ALL batches of this ingredient
@@ -3956,8 +3950,8 @@ impl Database {
                 UPDATE cust_BulkPicked
                 SET PickedBulkQty = 0, PickedQty = 0,
                     ItemBatchStatus = NULL, PickingDate = NULL, ModifiedBy = NULL
-                WHERE RunNo = {} AND LineId = {}
-            "#, run_no, line_id)
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
         };
 
         client.simple_query(&reset_picked_query).await
@@ -3981,25 +3975,25 @@ impl Database {
                     DELETE FROM LotTransaction
                     WHERE TransactionType = 5
                       AND User5 = 'Picking Customization'
-                      AND LotTranNo IN ({})
+                      AND LotTranNo IN ({lot_tran_nos_str})
                       AND EXISTS (
-                          SELECT 1 FROM Cust_BulkLotPicked blp 
-                          WHERE blp.RunNo = {} AND blp.RowNum = {} AND blp.LineId = {} 
-                          AND blp.LotNo = '{}' AND LotTransaction.IssueDocNo = blp.BatchNo
+                          SELECT 1 FROM Cust_BulkLotPicked blp
+                          WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
+                          AND blp.LotNo = '{lot}' AND LotTransaction.IssueDocNo = blp.BatchNo
                       )
-                "#, lot_tran_nos_str, run_no, row_num, line_id, lot)
+                "#)
             } else {
                 format!(r#"
                     DELETE FROM LotTransaction
                     WHERE TransactionType = 5
                       AND User5 = 'Picking Customization'
-                      AND LotTranNo IN ({})
+                      AND LotTranNo IN ({lot_tran_nos_str})
                       AND EXISTS (
-                          SELECT 1 FROM Cust_BulkLotPicked blp 
-                          WHERE blp.RunNo = {} AND blp.LineId = {} 
+                          SELECT 1 FROM Cust_BulkLotPicked blp
+                          WHERE blp.RunNo = {run_no} AND blp.LineId = {line_id}
                           AND LotTransaction.IssueDocNo = blp.BatchNo
                       )
-                "#, lot_tran_nos_str, run_no, line_id)
+                "#)
             };
 
             // Execute the DELETE operation to clean up LotTransaction audit records
@@ -4094,14 +4088,14 @@ impl Database {
                 },
                 Err(e) => {
                     error!("❌ Failed to unpick ingredient {}: {}", item_key, e);
-                    total_errors.push(format!("Failed to unpick {}: {}", item_key, e));
+                    total_errors.push(format!("Failed to unpick {item_key}: {e}"));
                 }
             }
         }
 
         let result = serde_json::json!({
             "message": if total_errors.is_empty() {
-                format!("Successfully unpicked all lots from {} ingredients", total_ingredients_processed)
+                format!("Successfully unpicked all lots from {total_ingredients_processed} ingredients")
             } else {
                 format!("Unpicked {} ingredients with {} errors", total_ingredients_processed, total_errors.len())
             },
@@ -4309,7 +4303,7 @@ impl Database {
             stmt.bind(bin_no);
 
             stmt.execute(client).await
-                .with_context(|| format!("Failed to rollback inventory for lot {} bin {}", lot_no, bin_no))?;
+                .with_context(|| format!("Failed to rollback inventory for lot {lot_no} bin {bin_no}"))?;
             info!("✅ Rolled back {} qty for lot {} item {} bin {} (with safety check)", actual_issued, lot_no, item_key, bin_no);
         } else {
             info!("ℹ️ No LotTransaction record found - skipping inventory rollback");
@@ -4365,13 +4359,13 @@ impl Database {
                 DELETE FROM LotTransaction
                 WHERE TransactionType = 5
                   AND User5 = 'Picking Customization'
-                  AND LotTranNo IN ({})
+                  AND LotTranNo IN ({lot_tran_nos_str})
                   AND EXISTS (
-                      SELECT 1 FROM Cust_BulkLotPicked blp 
-                      WHERE blp.RunNo = {} AND blp.RowNum = {} AND blp.LineId = {} 
-                      AND blp.LotNo = '{}' AND LotTransaction.IssueDocNo = blp.BatchNo
+                      SELECT 1 FROM Cust_BulkLotPicked blp
+                      WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
+                      AND blp.LotNo = '{lot_no}' AND LotTransaction.IssueDocNo = blp.BatchNo
                   )
-            "#, lot_tran_nos_str, run_no, row_num, line_id, lot_no);
+            "#);
 
             // Execute the DELETE operation to clean up LotTransaction audit records
             client.simple_query(&delete_lot_transaction_query).await

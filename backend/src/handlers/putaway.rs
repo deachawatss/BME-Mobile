@@ -17,10 +17,10 @@ use crate::services::{
 /// Create putaway routes
 pub fn create_putaway_routes() -> Router<Database> {
     Router::new()
-        .route("/lot/:lot_no", get(search_lot))
+        .route("/lot/{lot_no}", get(search_lot))
         .route("/lots/search", get(search_lots))
         .route("/bins/search", get(search_bins))
-        .route("/bin/:location/:bin_no", get(validate_bin))
+        .route("/bin/{location}/{bin_no}", get(validate_bin))
         .route("/transfer", post(execute_transfer))
         .route("/health", get(get_health))
 }
