@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import { BulkRunsService, BulkRunFormData, BulkRunSearchResponse, InventoryStatus, InventoryAlert, BulkRunSummary, BulkRunListResponse, PaginationInfo, RunItemSearchResult, LotSearchResult, PalletBatch, PalletTrackingResponse, PickedLot, PickedLotsResponse, UnpickRequest, BatchWeightSummaryItem, BatchWeightSummaryResponse, BulkRunStatusResponse } from '../../services/bulk-runs.service';
 import { BangkokTimezoneService } from '../../services/bangkok-timezone.service';
 import { PrintDataService, PrintLabelData } from '../../services/print-data.service';
+import { RunStatusManager, StatusTrigger } from '../../services/run-status-manager';
 import { HttpClientModule } from '@angular/common/http';
 import { debounceTime, distinctUntilChanged, tap, catchError } from 'rxjs/operators';
 import { Observable, throwError } from 'rxjs';
@@ -1575,6 +1576,7 @@ export class BulkPickingComponent implements AfterViewInit {
   bulkRunsService = inject(BulkRunsService);
   private bangkokTimezone = inject(BangkokTimezoneService);
   private printDataService = inject(PrintDataService);
+  private runStatusManager = inject(RunStatusManager);
   private cdr = inject(ChangeDetectorRef);
 
   // Reactive signals for state management
@@ -1599,12 +1601,8 @@ export class BulkPickingComponent implements AfterViewInit {
   private staleDataDetectionCooldowns = new Map<string, number>();
   private readonly STALE_DATA_COOLDOWN_MS = 2000; // 2-second cooldown for stale data detection
 
-  // RACE CONDITION FIX: Mutex and debouncing for state operations
-  private completionCheckInProgress = false;
-  private completionCheckTimeout: any = null;
+  // INGREDIENT LOADING PROTECTION: Simple mutex for ingredient loading operations
   private ingredientLoadingInProgress = false;
-  private lastCompletionCheckTimestamp = 0;
-  private readonly COMPLETION_DEBOUNCE_MS = 500; // 500ms debounce for completion checks
   
   // Lot search modal state signals
   showLotSearchModal = signal(false);
@@ -3407,11 +3405,9 @@ export class BulkPickingComponent implements AfterViewInit {
               this.refreshRunLevelPickedData();
               this.refreshRunStatus();
 
-              // Step 6: Check for run completion (with race condition protection)
-              console.log('🔍 ATOMIC_REFRESH: Starting completion check with 100ms delay...');
-              setTimeout(() => {
-                this.checkAndUpdateRunCompletion(runNumber);
-              }, 100);
+              // Step 6: Check for run completion using centralized manager
+              console.log('🔍 ATOMIC_REFRESH: Triggering completion check via RunStatusManager...');
+              this.runStatusManager.triggerCompletionCheck(runNumber, StatusTrigger.AFTER_PICK);
 
               console.log(`✅ ATOMIC_REFRESH: Complete state refresh finished - ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
             },
@@ -3423,10 +3419,8 @@ export class BulkPickingComponent implements AfterViewInit {
               this.checkIngredientCompletionAndSwitch();
               this.cdr.detectChanges();
 
-              // Still attempt completion check
-              setTimeout(() => {
-                this.checkAndUpdateRunCompletion(runNumber);
-              }, 100);
+              // Still attempt completion check via manager
+              this.runStatusManager.triggerCompletionCheck(runNumber, StatusTrigger.AFTER_PICK);
             }
           });
         } else {
@@ -3774,7 +3768,7 @@ export class BulkPickingComponent implements AfterViewInit {
       console.log('🔍 All pallets done for ingredient - checking if entire run should change to PRINT status...');
       const currentResults = this.searchResults();
       if (currentResults && currentResults.length > 0 && currentResults[0].run.run_no) {
-        this.checkAndUpdateRunCompletion(currentResults[0].run.run_no);
+        this.runStatusManager.triggerCompletionCheck(currentResults[0].run.run_no, StatusTrigger.PALLET_COMPLETED);
       }
     }
   }
@@ -3939,101 +3933,8 @@ export class BulkPickingComponent implements AfterViewInit {
     // this.toastr.success(message, 'Ingredient Completed');
   }
 
-  // **UNIVERSAL RUN COMPLETION CHECK WITH RACE CONDITION PROTECTION**
-  private checkAndUpdateRunCompletion(runNumber: number): void {
-    // RACE CONDITION FIX: Implement debouncing and mutex protection
-    const currentTime = Date.now();
-
-    // Clear existing timeout if present
-    if (this.completionCheckTimeout) {
-      clearTimeout(this.completionCheckTimeout);
-      this.completionCheckTimeout = null;
-    }
-
-    // Check if we're within debounce period
-    if (currentTime - this.lastCompletionCheckTimestamp < this.COMPLETION_DEBOUNCE_MS) {
-      console.log(`🔒 DEBOUNCE: Skipping completion check - within ${this.COMPLETION_DEBOUNCE_MS}ms debounce period`);
-      return;
-    }
-
-    // Check if completion check is already in progress
-    if (this.completionCheckInProgress) {
-      console.log(`🔒 MUTEX: Completion check already in progress for run ${runNumber} - skipping duplicate`);
-      return;
-    }
-
-    // Set debounced execution
-    this.completionCheckTimeout = setTimeout(() => {
-      this.executeCompletionCheck(runNumber);
-    }, this.COMPLETION_DEBOUNCE_MS);
-  }
-
-  // **ACTUAL COMPLETION CHECK EXECUTION** - Protected by mutex
-  private executeCompletionCheck(runNumber: number): void {
-    // Double-check mutex before execution
-    if (this.completionCheckInProgress) {
-      console.log(`🔒 DOUBLE_CHECK: Completion check already in progress - aborting`);
-      return;
-    }
-
-    this.completionCheckInProgress = true;
-    this.lastCompletionCheckTimestamp = Date.now();
-
-    console.log(`🔍 PROTECTED COMPLETION CHECK: Checking if run ${runNumber} is complete...`);
-
-    // Call backend to check if all ingredients in the run are complete
-    this.bulkRunsService.checkDetailedRunCompletion(runNumber).subscribe({
-      next: (response: any) => {
-        try {
-          if (response.success && response.data) {
-            const { is_complete, incomplete_count, completed_count, total_ingredients } = response.data;
-
-            console.log(`📊 RUN COMPLETION STATUS: ${completed_count}/${total_ingredients} ingredients complete, ${incomplete_count} remaining`);
-
-            if (is_complete) {
-              console.log(`🎉 RUN COMPLETED! All ingredients finished for run ${runNumber} - updating status to PRINT`);
-
-              // Update run status from NEW to PRINT
-              this.updateRunStatusToPrint(runNumber);
-            } else {
-              console.log(`⏳ Run ${runNumber} still in progress: ${incomplete_count} ingredients remaining`);
-            }
-          }
-        } finally {
-          // Always release the mutex
-          this.completionCheckInProgress = false;
-        }
-      },
-      error: (error: any) => {
-        console.error(`❌ Failed to check run completion for run ${runNumber}:`, error);
-        // Always release the mutex on error
-        this.completionCheckInProgress = false;
-      }
-    });
-  }
-
-  // Update run status from NEW to PRINT when all ingredients are complete
-  private updateRunStatusToPrint(runNumber: number): void {
-    this.bulkRunsService.updateRunStatusToPrint(runNumber).subscribe({
-      next: (response: any) => {
-        if (response.success) {
-          console.log(`✅ RUN STATUS UPDATED: Run ${runNumber} status changed from NEW to PRINT`);
-
-          // Refresh the run status to update UI
-          this.refreshRunStatus();
-
-          // Show completion message to user
-          alert(`🎉 Congratulations! Run ${runNumber} is now complete!\n\nStatus has been changed to PRINT. All ingredients have been successfully picked.`);
-        } else {
-          console.warn(`⚠️ Failed to update run status: ${response.message}`);
-        }
-      },
-      error: (error: any) => {
-        console.error(`❌ Failed to update run status to PRINT:`, error);
-        // Don't show error to user unless it's critical
-      }
-    });
-  }
+  // DEPRECATED: Status update methods moved to RunStatusManager
+  // This ensures all status updates go through centralized management
   
   // Load the next available ingredient for picking
   private loadNextAvailableIngredient(runNumber: number): void {
@@ -4063,7 +3964,7 @@ export class BulkPickingComponent implements AfterViewInit {
 
       // **CRITICAL FIX**: Trigger universal completion check to update status NEW → PRINT
       console.log('🔍 All ingredients done - checking if run should change to PRINT status...');
-      this.checkAndUpdateRunCompletion(runNumber);
+      this.runStatusManager.triggerCompletionCheck(runNumber, StatusTrigger.RUN_COMPLETED);
     }
   }
   
@@ -5203,14 +5104,16 @@ export class BulkPickingComponent implements AfterViewInit {
   private refreshRunStatus(): void {
     const formData = this.currentFormData();
     if (!formData?.run) return;
-    
+
     const runNo = formData.run.run_no;
     this.isLoadingStatus.set(true);
-    
+
     this.bulkRunsService.getBulkRunStatus(runNo).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.currentRunStatus.set(response.data);
+          // Also update the status manager's state
+          this.runStatusManager.setCurrentStatus(runNo, response.data.status);
           console.log(`🏁 STATUS FLAG: Run ${runNo} status: ${response.data.status}`);
         } else {
           this.currentRunStatus.set(null);
