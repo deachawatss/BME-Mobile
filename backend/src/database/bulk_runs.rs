@@ -3921,16 +3921,31 @@ impl Database {
                     PickedQty = CASE
                         WHEN PickedBulkQty - {} <= 0 THEN 0
                         ELSE (PickedBulkQty - {}) * PackSize
+                    END,
+                    ItemBatchStatus = CASE
+                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        ELSE 'Allocated'
+                    END,
+                    PickingDate = CASE
+                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        ELSE PickingDate
+                    END,
+                    ModifiedBy = CASE
+                        WHEN PickedBulkQty - {} <= 0 THEN NULL
+                        ELSE ModifiedBy
                     END
                     WHERE RunNo = {} AND RowNum = {} AND LineId = {}
                 "#, total_qty_to_rollback, total_qty_to_rollback,
                     total_qty_to_rollback, total_qty_to_rollback,
+                    total_qty_to_rollback, total_qty_to_rollback,
+                    total_qty_to_rollback,
                     run_no, row_num, line_id)
             } else {
                 // Fallback: Reset specific row only when no rollback quantity found
                 format!(r#"
                     UPDATE cust_BulkPicked
-                    SET PickedBulkQty = 0, PickedQty = 0
+                    SET PickedBulkQty = 0, PickedQty = 0,
+                        ItemBatchStatus = NULL, PickingDate = NULL, ModifiedBy = NULL
                     WHERE RunNo = {} AND RowNum = {} AND LineId = {}
                 "#, run_no, row_num, line_id)
             }
@@ -3938,7 +3953,8 @@ impl Database {
             // For entire ingredient unpick, reset ALL batches of this ingredient
             format!(r#"
                 UPDATE cust_BulkPicked
-                SET PickedBulkQty = 0, PickedQty = 0
+                SET PickedBulkQty = 0, PickedQty = 0,
+                    ItemBatchStatus = NULL, PickingDate = NULL, ModifiedBy = NULL
                 WHERE RunNo = {} AND LineId = {}
             "#, run_no, line_id)
         };
@@ -4149,9 +4165,9 @@ impl Database {
         
         // Step 1: Get the specific allocation record using LotTranNo
         let get_allocation_query = r#"
-            SELECT blp.RunNo, blp.RowNum, blp.LineId, blp.LotNo, blp.BinNo, 
-                   blp.ItemKey, blp.AllocLotQty, blp.PackSize, blp.BatchNo,
-                   bp.ItemKey as BulkPickedItemKey
+            SELECT blp.RunNo, blp.RowNum, blp.LineId, blp.LotNo, blp.BinNo,
+                   blp.ItemKey, blp.AllocLotQty, blp.BatchNo,
+                   bp.PackSize, bp.ItemKey as BulkPickedItemKey
             FROM Cust_BulkLotPicked blp
             INNER JOIN cust_BulkPicked bp ON bp.RunNo = blp.RunNo AND bp.RowNum = blp.RowNum AND bp.LineId = blp.LineId
             WHERE blp.LotTranNo = @P1
@@ -4179,10 +4195,11 @@ impl Database {
         let bin_no: &str = row.get("BinNo").unwrap_or("");
         let item_key: &str = row.get("ItemKey").unwrap_or("");
         let alloc_lot_qty: f64 = row.get("AllocLotQty").unwrap_or(0.0);
+        let pack_size: f64 = row.get("PackSize").context("PackSize must be available from cust_BulkPicked table")?;
         let batch_no: &str = row.get("BatchNo").unwrap_or("");
 
-        info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, Qty: {}", 
-              run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty);
+        info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, AllocLotQty: {} KG, PackSize: {} KG/bag",
+              run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty, pack_size);
 
         // Step 2: Get corresponding LotTransaction record for actual issued quantity AND collect LotTranNo values
         let get_transaction_query = r#"
@@ -4298,30 +4315,47 @@ impl Database {
         }
 
         // Step 6: Update picked quantities in cust_BulkPicked (subtract the specific quantity)
+        // FIXED: Use separate variables to avoid calculation inconsistencies
         let update_picked_query = r#"
-            UPDATE cust_BulkPicked 
-            SET PickedBulkQty = CASE 
-                WHEN PickedBulkQty - @P1 <= 0 THEN 0 
+            UPDATE cust_BulkPicked
+            SET PickedBulkQty = CASE
+                WHEN PickedBulkQty - @P1 <= 0 THEN 0
                 ELSE PickedBulkQty - @P1
             END,
-            PickedQty = CASE 
-                WHEN PickedBulkQty - @P1 <= 0 THEN 0 
-                ELSE (PickedBulkQty - @P1) * PackSize
+            PickedQty = CASE
+                WHEN PickedBulkQty - @P1 <= 0 THEN 0
+                ELSE PickedQty - @P5
+            END,
+            ItemBatchStatus = CASE
+                WHEN PickedBulkQty - @P1 <= 0 THEN NULL
+                ELSE 'Allocated'
+            END,
+            PickingDate = CASE
+                WHEN PickedBulkQty - @P1 <= 0 THEN NULL
+                ELSE PickingDate
+            END,
+            ModifiedBy = CASE
+                WHEN PickedBulkQty - @P1 <= 0 THEN NULL
+                ELSE ModifiedBy
             END
             WHERE RunNo = @P2 AND RowNum = @P3 AND LineId = @P4
         "#;
 
-        // Use allocated quantity (in bags) for the update
-        let qty_in_bags = alloc_lot_qty;
+        // CRITICAL FIX: Convert AllocLotQty (KG) to bags by dividing by PackSize
+        let qty_in_bags = alloc_lot_qty / pack_size;
+        let qty_in_kg = alloc_lot_qty; // The actual KG amount to subtract from PickedQty
+        info!("🔧 UNIT_CONVERSION: AllocLotQty: {} KG ÷ PackSize: {} KG/bag = {} bags to subtract",
+              alloc_lot_qty, pack_size, qty_in_bags);
         let mut stmt = tiberius::Query::new(update_picked_query);
-        stmt.bind(qty_in_bags);
-        stmt.bind(run_no);
-        stmt.bind(row_num);
-        stmt.bind(line_id);
+        stmt.bind(qty_in_bags);    // @P1 - bags to subtract from PickedBulkQty
+        stmt.bind(run_no);         // @P2
+        stmt.bind(row_num);        // @P3
+        stmt.bind(line_id);        // @P4
+        stmt.bind(qty_in_kg);      // @P5 - KG to subtract from PickedQty
 
         stmt.execute(client).await
             .context("Failed to update picked quantities")?;
-        info!("✅ Updated picked quantities in cust_BulkPicked (subtracted {} bags)", qty_in_bags);
+        info!("✅ Updated picked quantities in cust_BulkPicked (subtracted {} bags = {} KG)", qty_in_bags, alloc_lot_qty);
 
         // Step 7: Delete corresponding LotTransaction records using direct LotTranNo approach (SAFE & CONSISTENT)
         // This ensures consistency with the "Delete All" batch operation approach
