@@ -1174,8 +1174,10 @@ interface ProductionRun {
                         <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">BinNo</th>
                         <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">DateExp</th>
                         <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyOnHand</th>
-                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">CommitedQty</th>
-                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">Available Bags</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">CommittedQty</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyAvailable</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">BagsAvailable</th>
+                        <th class="coffee-header tw-min-w-[80px] tw-text-xs md:tw-text-sm">PackSize</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1187,7 +1189,9 @@ interface ProductionRun {
                         <td class="table-cell tw-font-mono tw-text-center tw-text-xs md:tw-text-sm">{{ lot.date_exp | date:'dd/MM/yyyy' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.qty_on_hand | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.committed_qty | number:'1.2-2' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm">{{ lot.available_qty | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm tw-font-bold tw-text-green-700">{{ lot.available_bags }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right tw-text-xs md:tw-text-sm tw-font-semibold tw-text-blue-700">{{ lot.pack_size | number:'1.2-2' }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1318,22 +1322,26 @@ interface ProductionRun {
                   <table class="tw-min-w-full">
                     <thead>
                       <tr>
-                        <th class="coffee-header tw-min-w-[120px]">BinNo</th>
-                        <th class="coffee-header tw-min-w-[150px]">LOCATION</th>
-                        <th class="coffee-header tw-min-w-[120px]">QtyOnHand</th>
-                        <th class="coffee-header tw-min-w-[120px]">CommitedQty</th>
-                        <th class="coffee-header tw-min-w-[120px]">Available Bags</th>
+                        <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">BinNo</th>
+                        <th class="coffee-header tw-min-w-[100px] tw-text-xs md:tw-text-sm">DateExp</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyOnHand</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">CommittedQty</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">QtyAvailable</th>
+                        <th class="coffee-header tw-min-w-[90px] tw-text-xs md:tw-text-sm">BagsAvailable</th>
+                        <th class="coffee-header tw-min-w-[80px] tw-text-xs md:tw-text-sm">PackSize</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr *ngFor="let bin of availableBinsForLot(); let i = index" 
+                      <tr *ngFor="let bin of availableBinsForLot(); let i = index"
                           [class]="i % 2 === 0 ? 'cream-row' : 'latte-row'"
                           (click)="selectBinFromModal(bin)">
                         <td class="table-cell tw-font-mono tw-font-bold">{{ bin.bin_no }}</td>
-                        <td class="table-cell tw-text-left tw-pl-4">{{ bin.location_key || 'TFC1' }}</td>
-                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.qty_on_hand | number:'1.4-4' }}</td>
-                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.committed_qty | number:'1.4-4' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-center">{{ bin.date_exp | date:'MM/dd/yyyy' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.qty_on_hand | number:'1.2-2' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.committed_qty | number:'1.2-2' }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.available_qty | number:'1.2-2' }}</td>
                         <td class="table-cell tw-font-mono tw-text-right tw-font-bold tw-text-green-700">{{ bin.available_bags }}</td>
+                        <td class="table-cell tw-font-mono tw-text-right">{{ bin.pack_size | number:'1.2-2' }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -5242,7 +5250,7 @@ export class BulkPickingComponent implements AfterViewInit {
       quantity_picked: lot.alloc_lot_qty, // Use allocated quantity as picked quantity
       bin_location: lot.bin_no,
       expiry_date: lot.date_exp || '',
-      bag_size: lot.pack_size,
+      pack_size: lot.pack_size,
       ingredient_name: lot.item_key
     }));
   }

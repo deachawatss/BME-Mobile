@@ -1100,7 +1100,7 @@ impl Database {
             .await
             .context("Failed to get read database client")?;
 
-        // Simplified query - matches official app logic exactly, eliminates duplicates
+        // Enhanced query with PackSize from cust_BulkPicked - matches paginated version
         let query = format!(
             r#"
             SELECT DISTINCT
@@ -1111,9 +1111,11 @@ impl Database {
                 l.QtyIssued,
                 l.QtyCommitSales as CommitedQty,
                 (l.QtyOnHand - l.QtyCommitSales) as AvailableQty,
+                FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) as AvailableBags,
+                bp.PackSize,
                 l.ItemKey,
                 l.LocationKey,
-                CASE 
+                CASE
                     WHEN l.BinNo LIKE 'A%-%' THEN 5    -- A-zone (highest priority)
                     WHEN l.BinNo LIKE 'K%-%' THEN 4    -- K-zone storage
                     WHEN l.BinNo LIKE 'TPJS%' THEN 3   -- Special picking
@@ -1121,20 +1123,25 @@ impl Database {
                 END as BinPriority
             FROM LotMaster l
             INNER JOIN BINMaster b ON l.BinNo = b.BinNo AND l.LocationKey = b.Location
+            INNER JOIN cust_BulkPicked bp ON l.ItemKey = bp.ItemKey AND bp.RunNo = {run_no}
             WHERE l.ItemKey = '{item_key}'
                 AND l.LocationKey = 'TFC1'
                 AND l.QtyOnHand > 0
-                AND l.LotStatus = 'P'
+                AND (l.LotStatus != 'H' AND l.LotStatus != 'B' OR l.LotStatus IS NULL)  -- Exclude B (Blocked) and H (Hold) statuses
                 AND (l.QtyOnHand - l.QtyCommitSales) > 0                    -- Available inventory only
+                AND l.QtyOnHand >= bp.PackSize                              -- PackSize minimum threshold validation
+                AND FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) >= 1  -- Must have at least 1 available bag
                 AND (b.User4 IS NULL OR b.User4 != 'PARTIAL')              -- Exclude partial picking bins
                 AND l.BinNo NOT LIKE '%Variance'                           -- Exclude variance bins
                 AND b.User1 NOT LIKE '%WHTIP8%'                            -- Exclude special bins
-            ORDER BY 
+                AND (l.DateExpiry IS NULL OR l.DateExpiry >= GETDATE())    -- CRITICAL: Exclude expired lots completely
+            ORDER BY
                 l.DateExpiry ASC,              -- FEFO: First Expired, First Out
                 BinPriority DESC,              -- A-zone first, then K-zone
                 (l.QtyOnHand - l.QtyCommitSales) ASC,    -- Smaller available quantity first
                 l.LotNo ASC                    -- Consistent ordering
         "#,
+            run_no = run_no,
             item_key = item_key
         );
 
