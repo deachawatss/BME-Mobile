@@ -1085,7 +1085,7 @@ interface ProductionRun {
                     <thead>
                       <tr>
                         <th class="coffee-header tw-min-w-[120px]">ItemKey</th>
-                        <th class="coffee-header tw-min-w-[80px]">Location</th>
+                        <th class="coffee-header tw-min-w-[80px] tw-hidden">Location</th>
                         <th class="coffee-header tw-min-w-[80px]">LineID</th>
                         <th class="coffee-header tw-min-w-[200px]">Description</th>
                       </tr>
@@ -1095,7 +1095,7 @@ interface ProductionRun {
                           [class]="i % 2 === 0 ? 'cream-row' : 'latte-row'"
                           (click)="selectItemFromModal(item)">
                         <td class="table-cell tw-font-mono tw-font-bold">{{ item.item_key }}</td>
-                        <td class="table-cell tw-font-mono">{{ item.location }}</td>
+                        <td class="table-cell tw-font-mono tw-hidden">{{ item.location }}</td>
                         <td class="table-cell tw-font-mono tw-font-semibold">{{ item.line_id }}</td>
                         <td class="table-cell tw-text-left tw-pl-4">{{ item.description }}</td>
                       </tr>
@@ -1422,9 +1422,9 @@ interface ProductionRun {
                   class="tw-px-4 tw-py-2 tw-text-sm tw-font-medium tw-border-b-2 tw-transition-colors tw-cursor-pointer"
                   type="button">
                   Pending to Picked
-                  <span *ngIf="filteredBatchItems()?.length"
+                  <span *ngIf="filteredBatchItems().length"
                         class="tw-ml-2 tw-bg-blue-500 tw-text-white tw-text-xs tw-px-2 tw-py-0.5 tw-rounded-full">
-                    {{filteredBatchItems()?.length}}
+                    {{filteredBatchItems().length}}
                   </span>
                 </button>
               </nav>
@@ -1460,7 +1460,7 @@ interface ProductionRun {
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Batch No</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Lot No.</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">ItemKey</th>
-                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Location</th>
+                          <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider tw-hidden">Location</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Expiry Date</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">Qty Picked</th>
                           <th class="tw-px-3 tw-py-2 tw-text-left tw-text-xs tw-font-medium tw-text-gray-500 tw-uppercase tw-tracking-wider">BinNo</th>
@@ -1474,7 +1474,7 @@ interface ProductionRun {
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{lot.batch_no}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{lot.lot_no}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{lot.item_key}}</td>
-                          <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{lot.location_key}}</td>
+                          <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900 tw-hidden">{{lot.location_key}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">
                             {{lot.date_exp ? (lot.date_exp | date:'dd/MM/yyyy') : 'N/A'}}
                           </td>
@@ -1528,7 +1528,7 @@ interface ProductionRun {
                             {{batch.remaining_weight_kg | number:'1.2-2'}}
                           </td>
                         </tr>
-                        <tr *ngIf="!filteredBatchItems()?.length">
+                        <tr *ngIf="!filteredBatchItems().length">
                           <td colspan="3" class="tw-px-3 tw-py-8 tw-text-center tw-text-gray-500">
                             No pending batch requirements found
                           </td>
