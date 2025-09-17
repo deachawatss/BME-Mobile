@@ -2037,10 +2037,10 @@ export class BulkPickingComponent implements AfterViewInit {
       // Clear pending pick values when switching ingredients to prevent state leakage
       pendingPickBags: 0,
       pendingPickKg: '0.0000',
-      // Remaining to pick - dual units (use backend-authoritative data as primary source)
-      remainingToPickBags: formatDecimal(fields.remaining_bags), // Use backend calculation directly
+      // Remaining to pick - dual units (use CURRENT active pallet, not total across all pallets)
+      remainingToPickBags: this.calculateCurrentPalletRemaining(), // Use current active pallet only
       remainingBagsUom: this.getDynamicBagsUOM(fields.item_key) || fields.remaining_bags_uom || 'BAGS',
-      remainingKg: formatDecimal(fields.remaining_kg), // Use API value  
+      remainingKg: this.calculateCurrentPalletRemainingKg(), // Use current active pallet only
       remainingKgUom: this.getDynamicWeightUOM(fields.item_key) || fields.remaining_kg_uom || 'KG',
       // Initialize suggested lot/bin as empty - will be populated asynchronously using lot search API
       suggestedLotNumber: '',
@@ -2085,6 +2085,57 @@ export class BulkPickingComponent implements AfterViewInit {
         // Don't throw error - this shouldn't break form loading
       }
     });
+  }
+
+  /**
+   * Calculate remaining bags for CURRENT active pallet only (not total across all pallets)
+   * This ensures "Remaining to Pick" header shows current pallet context, not run totals
+   */
+  private calculateCurrentPalletRemaining(): string {
+    const palletData = this.palletData();
+    if (!palletData?.length) {
+      // Fallback to backend total if no pallet data available
+      const currentData = this.currentFormData();
+      return currentData ? this.formatDecimal(currentData.form_data.remaining_bags) : '0.0000';
+    }
+
+    // Find current active pallet (first pallet with remaining quantity > 0)
+    const activePallet = palletData.find(p => p.no_of_bags_remaining > 0);
+    return activePallet ? this.formatDecimal(activePallet.no_of_bags_remaining) : '0.0000';
+  }
+
+  /**
+   * Calculate remaining KG for CURRENT active pallet only (not total across all pallets)
+   * Maintains consistency with bag calculation for current pallet context
+   */
+  private calculateCurrentPalletRemainingKg(): string {
+    const palletData = this.palletData();
+    if (!palletData?.length) {
+      const currentData = this.currentFormData();
+      return currentData ? this.formatDecimal(currentData.form_data.remaining_kg) : '0.0000';
+    }
+
+    const activePallet = palletData.find(p => p.no_of_bags_remaining > 0);
+    return activePallet ? this.formatDecimal(activePallet.quantity_remaining) : '0.0000';
+  }
+
+  /**
+   * Update "Remaining to Pick" display values with current pallet calculations
+   * Called after state changes (picks, unpicks, pallet switches) to maintain accuracy
+   */
+  private updateRemainingDisplayValues(): void {
+    this.productionForm.patchValue({
+      remainingToPickBags: this.calculateCurrentPalletRemaining(),
+      remainingKg: this.calculateCurrentPalletRemainingKg()
+    });
+  }
+
+  /**
+   * Format decimal values consistently for display
+   */
+  private formatDecimal(value: string | number): string {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    return isNaN(numValue) ? '0.0000' : numValue.toFixed(4);
   }
 
   // Story 1.2: Inventory management methods
@@ -2866,12 +2917,29 @@ export class BulkPickingComponent implements AfterViewInit {
       const packSize = parseFloat(formData.current_ingredient.ingredient.pack_size || '0');
       const remainingKg = remainingBags * packSize;
 
-      console.log(`🎯 UNIFIED_STATE: Using same data source as completion logic: ${remainingBags} bags, ${remainingKg} kg`);
+      // VALIDATION: Add debugging for unpick scenarios
+      const totalNeeded = parseFloat(formData.current_ingredient.calculations.total_needed || '0');
+      const pickedSoFar = totalNeeded - remainingBags;
 
-      // CRITICAL: Always use unified calculation source to prevent state conflicts
+      console.log(`🎯 UNIFIED_STATE: Using same data source as completion logic:`);
+      console.log(`  - Total needed: ${totalNeeded} bags`);
+      console.log(`  - Picked so far: ${pickedSoFar} bags`);
+      console.log(`  - Remaining: ${remainingBags} bags`);
+      console.log(`  - Remaining KG: ${remainingKg} kg`);
+
+      // VALIDATION: Check for inconsistencies that could indicate backend calculation errors
+      if (remainingBags < 0) {
+        console.warn(`⚠️ VALIDATION: Negative remaining bags detected: ${remainingBags}`);
+      }
+      if (remainingBags > totalNeeded) {
+        console.warn(`⚠️ VALIDATION: Remaining bags (${remainingBags}) exceeds total needed (${totalNeeded})`);
+      }
+
+      // CRITICAL: Use pallet-aware calculations instead of backend totals
+      // This ensures "Remaining to Pick" shows current active pallet, not total across all pallets
       this.productionForm.patchValue({
-        remainingToPickBags: Math.max(0, remainingBags).toFixed(4),
-        remainingKg: Math.max(0, remainingKg).toFixed(4)
+        remainingToPickBags: this.calculateCurrentPalletRemaining(),
+        remainingKg: this.calculateCurrentPalletRemainingKg()
       });
     } else if (formData?.form_data) {
       // FALLBACK: Use form_data if calculations not available
@@ -2881,8 +2949,8 @@ export class BulkPickingComponent implements AfterViewInit {
       console.warn(`⚠️ UNIFIED_STATE: Using fallback form_data source: ${remainingBags} bags, ${remainingKg} kg`);
 
       this.productionForm.patchValue({
-        remainingToPickBags: Math.max(0, remainingBags).toFixed(4),
-        remainingKg: Math.max(0, remainingKg).toFixed(4)
+        remainingToPickBags: this.calculateCurrentPalletRemaining(),
+        remainingKg: this.calculateCurrentPalletRemainingKg()
       });
     } else {
       // EMERGENCY: Only when backend data is completely unavailable
@@ -3652,67 +3720,66 @@ export class BulkPickingComponent implements AfterViewInit {
   private checkPalletCompletionAndAdvance(): void {
     const currentFormData = this.currentFormData();
     const pallets = this.palletData();
-    
+
     if (!currentFormData?.current_ingredient?.ingredient || !pallets || pallets.length === 0) {
       console.log('🚫 Insufficient data for pallet completion check - skipping');
       return;
     }
-    
+
     const currentLineId = currentFormData.current_ingredient.ingredient.line_id;
     const currentItemKey = currentFormData.current_ingredient.ingredient.item_key;
-    
-    // CRITICAL FIX: Use the same sequential selection logic as getCurrentBatchData()
+
     // Sort pallets by batch_number ascending to ensure sequential processing (850828→850829→850830...)
     const sortedPallets = [...pallets].sort((a: any, b: any) => {
       const aBatchNum = parseInt(a.batch_number?.toString() || '0');
       const bBatchNum = parseInt(b.batch_number?.toString() || '0');
       return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
     });
-    
-    // CRITICAL FIX: Always use the first pallet in sequential order (lowest batch_number)
-    // This ensures we check the correct pallet (850828 first, then 850829, etc.)
-    const currentPallet = sortedPallets[0]; // Always use first in sequence
-    
-    if (!currentPallet) {
-      console.log(`⚠️ No pallets found in tracking data for ItemKey: ${currentItemKey}`);
-      return;
-    }
-    
-    // CRITICAL FIX: Use the correct RowNum from the actual pallet being processed
-    const currentRowNum = currentPallet.row_num;
-    
-    console.log(`🎯 Checking pallet completion for ItemKey: ${currentItemKey}, RowNum: ${currentRowNum}, LineId: ${currentLineId} - Pallet: ${currentPallet.batch_number}`);
-    
-    const remainingBags = parseFloat(currentPallet.no_of_bags_remaining?.toString() || '0');
-    console.log(`📦 Current pallet ${currentPallet.batch_number} has ${remainingBags} bags remaining`);
-    
-    // Check if current pallet is completed (no bags remaining)
-    if (remainingBags <= 0.001) {
-      console.log(`✅ Pallet ${currentPallet.batch_number} completed! Looking for next pallet...`);
-      
-      // Find next incomplete pallet for the same ingredient (next sequential RowNum)
-      const nextPallet = pallets.find((p: PalletBatch) => {
-        const palletRemaining = parseFloat(p.no_of_bags_remaining?.toString() || '0');
-        return p.row_num > currentRowNum && palletRemaining > 0.001;
-      });
-      
-      if (nextPallet) {
-        console.log(`🔄 Advancing from completed pallet ${currentPallet.batch_number} (RowNum: ${currentRowNum}) to next pallet ${nextPallet.batch_number} (RowNum: ${nextPallet.row_num})`);
-        
-        // Update the current ingredient data to point to the next pallet
-        this.advanceToNextPallet(currentItemKey, nextPallet.row_num, currentLineId);
-      } else {
-        console.log(`🎉 All pallets completed for ingredient ${currentItemKey}!`);
 
-        // **CRITICAL FIX**: Trigger universal completion check when all pallets of an ingredient are done
-        console.log('🔍 All pallets done for ingredient - checking if entire run should change to PRINT status...');
-        const currentResults = this.searchResults();
-        if (currentResults && currentResults.length > 0 && currentResults[0].run.run_no) {
-          this.checkAndUpdateRunCompletion(currentResults[0].run.run_no);
-        }
+    // CRITICAL FIX: Check all pallets for completion, not just the first one
+    // This ensures we properly track completion of all pallets regardless of pick distribution
+    let completedPallets = [];
+    let activePallet = null;
+
+    for (const pallet of sortedPallets) {
+      const remainingBags = parseFloat(pallet.no_of_bags_remaining?.toString() || '0');
+      console.log(`🎯 Checking pallet completion for ItemKey: ${currentItemKey}, RowNum: ${pallet.row_num}, LineId: ${currentLineId} - Pallet: ${pallet.batch_number} (${remainingBags} bags remaining)`);
+
+      if (remainingBags <= 0.001) {
+        console.log(`✅ Pallet ${pallet.batch_number} completed!`);
+        completedPallets.push(pallet);
+      } else if (!activePallet) {
+        // First pallet with remaining inventory becomes the active pallet
+        activePallet = pallet;
+        console.log(`📦 Active pallet: ${pallet.batch_number} still has ${remainingBags} bags remaining`);
+      }
+    }
+
+    // Log completed pallets for debugging
+    if (completedPallets.length > 0) {
+      console.log(`✅ Completed pallets: ${completedPallets.map(p => p.batch_number).join(', ')}`);
+    }
+
+    // Check if we have an active pallet to advance to
+    if (activePallet) {
+      // If current form is not pointing to the active pallet, advance to it
+      const currentFormRowNum = currentFormData.current_ingredient.ingredient.row_num;
+      if (currentFormRowNum !== activePallet.row_num) {
+        console.log(`🔄 Advancing from completed pallets to next active pallet ${activePallet.batch_number} (RowNum: ${activePallet.row_num})`);
+        this.advanceToNextPallet(currentItemKey, activePallet.row_num, currentLineId);
+      } else {
+        console.log(`📦 Current pallet ${activePallet.batch_number} is already active with ${parseFloat(activePallet.no_of_bags_remaining?.toString() || '0')} bags remaining`);
       }
     } else {
-      console.log(`📦 Current pallet ${currentPallet.batch_number} still has ${remainingBags} bags remaining - continuing with same pallet`);
+      // All pallets are completed for this ingredient
+      console.log(`🎉 All pallets completed for ingredient ${currentItemKey}!`);
+
+      // Trigger universal completion check when all pallets of an ingredient are done
+      console.log('🔍 All pallets done for ingredient - checking if entire run should change to PRINT status...');
+      const currentResults = this.searchResults();
+      if (currentResults && currentResults.length > 0 && currentResults[0].run.run_no) {
+        this.checkAndUpdateRunCompletion(currentResults[0].run.run_no);
+      }
     }
   }
   
@@ -4319,14 +4386,22 @@ export class BulkPickingComponent implements AfterViewInit {
       next: (response) => {
         this.isLoadingPickedLots.set(false);
         
-        // Check if it's a "no allocations found" case (which means deletion was successful)
-        const isNoAllocationsCase = response.message && response.message.includes('No allocations found');
-        
-        if (response.success || isNoAllocationsCase) {
+        // Check for different success scenarios including "already clean" responses
+        const isNoAllocationsCase = response.message && (
+          response.message.includes('No allocations found') ||
+          response.message.includes('already unpicked')
+        );
+        const isAlreadyCleanCase = response.data && response.data.operation_type === 'unpick_already_clean';
+
+        if (response.success || isNoAllocationsCase || isAlreadyCleanCase) {
           // Show temporary success notification for 1 second
           let successMessage: string;
-          if (isNoAllocationsCase) {
-            successMessage = 'All lots have been successfully deleted';
+          if (isNoAllocationsCase || isAlreadyCleanCase) {
+            if (isRunWideDelete) {
+              successMessage = '✅ All lots already removed - run is clean';
+            } else {
+              successMessage = '✅ All lots already removed - ingredient is clean';
+            }
           } else if (isRunWideDelete) {
             successMessage = '🔄 Successfully unpicked ALL lots from entire run';
           } else if (actionDescription === 'entire batch') {
@@ -4366,22 +4441,33 @@ export class BulkPickingComponent implements AfterViewInit {
                     next: () => {
                       console.log(`🔄 ATOMIC_STATE: Pallet data refreshed, now running completion checks`);
 
-                      // 5. Only run completion checks after ALL state is updated
+                      // 5. CRITICAL: Refresh batch weight summary for consistent pallet table
+                      this.loadBatchWeightSummary();
+
+                      // 6. CRITICAL: Recalculate remaining quantities with fresh pallet data
+                      this.updateRemainingDisplayValues();
+
+                      // 7. Only run completion checks after ALL state is updated
                       this.checkIngredientCompletionAndSwitch();
 
-                      // 6. Force Angular change detection for immediate UI update
+                      // 8. Force Angular change detection for immediate UI update
                       this.cdr.detectChanges();
 
                       console.log(`✅ ATOMIC_STATE: Complete state refresh finished after unpick ${actionDescription}`);
                     },
                     error: (error: any) => {
                       console.warn('Failed to load pallet data after unpick, running completion checks anyway:', error);
+                      // Even if pallet data fails, refresh batch summary and recalculate
+                      this.loadBatchWeightSummary();
+                      this.updateRemainingDisplayValues();
                       this.checkIngredientCompletionAndSwitch();
                       this.cdr.detectChanges();
                     }
                   });
                 } else {
                   // Fallback if no current item key
+                  this.loadBatchWeightSummary();
+                  this.updateRemainingDisplayValues();
                   this.checkIngredientCompletionAndSwitch();
                   this.cdr.detectChanges();
                 }
