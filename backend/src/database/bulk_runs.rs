@@ -3025,26 +3025,18 @@ impl Database {
     ) -> Result<bool> {
         info!("🔍 DEBUG: Checking completion status for run {}", run_no);
         
-        // **COMPLETION DETECTION LOGIC**: Check if all ingredients with ToPickedBulkQty > 0 are fully picked
-        // Use allocation-based calculation instead of unreliable PickedBulkQty
+        // **CRITICAL FIX**: Check pallet-level completion using actual PickedBulkQty values
+        // Each pallet (RowNum) must be individually completed, not just ingredient aggregates
+        // This fixes the premature status change bug by validating every single pallet
         let completion_check_query = r#"
             SELECT COUNT(*) as IncompleteCount
             FROM cust_BulkPicked bp
-            LEFT JOIN (
-                SELECT RunNo, ItemKey,
-                       SUM(ISNULL(QtyReceived, 0) / PackSize) as ActualPickedQty
-                FROM Cust_BulkLotPicked
-                WHERE RunNo = @P1
-                GROUP BY RunNo, ItemKey
-            ) actual_picked ON bp.RunNo = actual_picked.RunNo
-                            AND bp.ItemKey = actual_picked.ItemKey
             WHERE bp.RunNo = @P1
               AND bp.ToPickedBulkQty > 0
-              AND (ISNULL(actual_picked.ActualPickedQty, 0) < bp.ToPickedBulkQty)
+              AND (bp.PickedBulkQty IS NULL OR bp.PickedBulkQty < bp.ToPickedBulkQty)
         "#;
         
         let mut check_stmt = TiberiusQuery::new(completion_check_query);
-        check_stmt.bind(run_no);
         check_stmt.bind(run_no);
         
         let check_result = check_stmt
@@ -3058,15 +3050,17 @@ impl Database {
             return Err(anyhow::anyhow!("No result returned from completion check query"));
         };
         
-        info!("📊 DEBUG: Run {} has {} incomplete bulk ingredients", run_no, incomplete_count);
-        
-        // If there are incomplete ingredients, run is not ready for completion
+        info!("📊 PALLET_CHECK: Run {} has {} incomplete pallets (pallet-level validation)", run_no, incomplete_count);
+
+        // If there are incomplete pallets, run is not ready for completion
         if incomplete_count > 0 {
+            info!("⏳ COMPLETION_CHECK: Run {} has {} incomplete pallets - remaining in NEW status",
+                  run_no, incomplete_count);
             return Ok(false);
         }
-        
-        // **ALL BULK INGREDIENTS COMPLETED** - Update run status to PRINT
-        info!("🎯 DEBUG: All bulk ingredients completed for run {} - Updating status NEW → PRINT", run_no);
+
+        // **ALL PALLETS COMPLETED** - Update run status to PRINT
+        info!("🎯 COMPLETION_SUCCESS: All pallets completed for run {} - Updating status NEW → PRINT", run_no);
         
         let update_run_status_query = r#"
             UPDATE Cust_BulkRun 
