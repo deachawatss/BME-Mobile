@@ -42,12 +42,9 @@ export class RunStatusManager {
    * Replaces all scattered checkAndUpdateRunCompletion() calls
    */
   public triggerCompletionCheck(runNumber: number, trigger: StatusTrigger): void {
-    console.log(`🎯 STATUS_MANAGER: Completion check triggered by ${trigger} for run ${runNumber}`);
-
     // **STATUS GUARD**: Skip if status is already PRINT
     const currentStatus = this.currentRunStatus()?.status;
     if (currentStatus === 'PRINT') {
-      console.log(`✅ STATUS_GUARD: Run ${runNumber} is already PRINT - skipping completion check`);
       return;
     }
 
@@ -62,13 +59,11 @@ export class RunStatusManager {
 
     // Check debounce period
     if (currentTime - this.lastCompletionCheckTimestamp < this.COMPLETION_DEBOUNCE_MS) {
-      console.log(`🔒 DEBOUNCE: Skipping completion check - within ${this.COMPLETION_DEBOUNCE_MS}ms debounce period`);
       return;
     }
 
     // Check mutex
     if (this.completionCheckInProgress) {
-      console.log(`🔒 MUTEX: Completion check already in progress for run ${runNumber} - skipping duplicate`);
       return;
     }
 
@@ -85,21 +80,17 @@ export class RunStatusManager {
     // **DOUBLE STATUS GUARD**: Verify status before execution
     const currentStatus = this.currentRunStatus()?.status;
     if (currentStatus === 'PRINT') {
-      console.log(`✅ DOUBLE_GUARD: Run ${runNumber} status is PRINT - aborting completion check`);
       return;
     }
 
     // **MUTEX CHECK**: Ensure no concurrent execution
     if (this.completionCheckInProgress) {
-      console.log(`🔒 DOUBLE_MUTEX: Completion check already in progress - aborting`);
       return;
     }
 
     // Set mutex and update timestamp
     this.completionCheckInProgress = true;
     this.lastCompletionCheckTimestamp = Date.now();
-
-    console.log(`🔍 EXECUTING_CHECK: Checking run ${runNumber} completion (trigger: ${trigger})`);
 
     // Call backend to check completion
     this.bulkRunsService.checkDetailedRunCompletion(runNumber).subscribe({
@@ -108,13 +99,8 @@ export class RunStatusManager {
           if (response.success && response.data) {
             const { is_complete, incomplete_count, completed_count, total_ingredients } = response.data;
 
-            console.log(`📊 COMPLETION_STATUS: ${completed_count}/${total_ingredients} ingredients complete, ${incomplete_count} remaining`);
-
             if (is_complete) {
-              console.log(`🎉 RUN_COMPLETE: All ingredients finished for run ${runNumber} - updating to PRINT`);
               this.updateRunStatusToPrint(runNumber);
-            } else {
-              console.log(`⏳ RUN_PROGRESS: Run ${runNumber} still in progress: ${incomplete_count} ingredients remaining`);
             }
           }
         } finally {
@@ -138,25 +124,18 @@ export class RunStatusManager {
     // **FINAL STATUS GUARD**: Last check before API call
     const currentStatus = this.currentRunStatus()?.status;
     if (currentStatus === 'PRINT') {
-      console.log(`✅ FINAL_GUARD: Run ${runNumber} is already PRINT - skipping duplicate update`);
       this.showCompletionMessage(runNumber, 'Status is already PRINT');
       return;
     }
 
-    console.log(`🔄 STATUS_UPDATE: Updating run ${runNumber} status to PRINT (current: ${currentStatus})`);
-
     this.bulkRunsService.updateRunStatusToPrint(runNumber).subscribe({
       next: (response: any) => {
         if (response.success) {
-          console.log(`✅ STATUS_UPDATED: Run ${runNumber} status changed from NEW to PRINT`);
-
           // Update local status state
           this.updateLocalStatus(runNumber, 'PRINT');
 
           // Show success message
           this.showCompletionMessage(runNumber, 'Status successfully updated to PRINT');
-        } else {
-          console.warn(`⚠️ STATUS_UPDATE_FAILED: ${response.message}`);
         }
       },
       error: (error: any) => {
@@ -164,15 +143,13 @@ export class RunStatusManager {
         const errorMessage = error?.error?.message || error?.message || error.toString();
 
         if (errorMessage.includes('already') && errorMessage.includes('PRINT')) {
-          console.log(`✅ ALREADY_PRINT: Run ${runNumber} was already PRINT - treating as success`);
-
           // Update local status to sync
           this.updateLocalStatus(runNumber, 'PRINT');
 
           // Show completion message
           this.showCompletionMessage(runNumber, 'Status was already PRINT');
         } else {
-          console.error(`❌ STATUS_UPDATE_ERROR: Failed to update run ${runNumber} status:`, error);
+          console.error(`Failed to update run ${runNumber} status:`, error);
         }
       }
     });
@@ -203,7 +180,6 @@ export class RunStatusManager {
    */
   public refreshRunStatus(runNumber?: number, newStatus?: string): void {
     if (runNumber) {
-      console.log(`🔄 REFRESH_STATUS: Refreshing status for run ${runNumber}`);
       if (newStatus) {
         this.updateLocalStatus(runNumber, newStatus);
       }

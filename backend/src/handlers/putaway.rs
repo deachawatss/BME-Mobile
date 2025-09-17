@@ -55,7 +55,7 @@ async fn search_lot(
             ))
         }
         Err(PutawayError::DatabaseError(msg)) => {
-            eprintln!("Database error in search_lot: {msg}");
+            tracing::error!("Database error in search_lot: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -65,7 +65,7 @@ async fn search_lot(
             ))
         }
         Err(e) => {
-            eprintln!("Unexpected error in search_lot: {e}");
+            tracing::error!("Unexpected error in search_lot: {e}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -106,7 +106,7 @@ async fn search_lots(
             })))
         },
         Err(PutawayError::DatabaseError(msg)) => {
-            eprintln!("Database error in search_lots: {msg}");
+            tracing::error!("Database error in search_lots: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -116,7 +116,7 @@ async fn search_lots(
             ))
         }
         Err(e) => {
-            eprintln!("Unexpected error in search_lots: {e}");
+            tracing::error!("Unexpected error in search_lots: {e}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -157,7 +157,7 @@ async fn search_bins(
             })))
         },
         Err(PutawayError::DatabaseError(msg)) => {
-            eprintln!("Database error in search_bins: {msg}");
+            tracing::error!("Database error in search_bins: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -167,7 +167,7 @@ async fn search_bins(
             ))
         }
         Err(e) => {
-            eprintln!("Unexpected error in search_bins: {e}");
+            tracing::error!("Unexpected error in search_bins: {e}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -190,7 +190,7 @@ async fn validate_bin(
     match service.validate_bin(&location, &bin_no).await {
         Ok(result) => Ok(Json(result)),
         Err(PutawayError::DatabaseError(msg)) => {
-            eprintln!("Database error in validate_bin: {msg}");
+            tracing::error!("Database error in validate_bin: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -200,7 +200,7 @@ async fn validate_bin(
             ))
         }
         Err(e) => {
-            eprintln!("Unexpected error in validate_bin: {e}");
+            tracing::error!("Unexpected error in validate_bin: {e}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -274,7 +274,7 @@ async fn execute_transfer(
             ))
         }
         Err(PutawayError::TransactionError(msg)) => {
-            eprintln!("Transaction error in execute_transfer: {msg}");
+            tracing::error!("Transaction error in execute_transfer: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -284,7 +284,7 @@ async fn execute_transfer(
             ))
         }
         Err(PutawayError::DatabaseError(msg)) => {
-            eprintln!("Database error in execute_transfer: {msg}");
+            tracing::error!("Database error in execute_transfer: {msg}");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({

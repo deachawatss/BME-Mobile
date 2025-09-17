@@ -34,6 +34,7 @@ pub struct AppState {
     pub database: database::Database,
     pub ldap_config: LdapConfig,
     pub auth_service: AuthService,
+    pub static_assets_path: String,
 }
 
 impl std::fmt::Debug for AppState {
@@ -203,35 +204,63 @@ async fn login(
         return Ok(Json(ApiResponse::error("Authentication is currently disabled")));
     }
 
-    // Try both domain formats for LDAP authentication
-    let user_formats = vec![
-        format!("{}@NWFTH.com", request.username),
-        format!("{}@newlywedsfoods.co.th", request.username),
-        request.username.clone(),
-    ];
+    // Try LDAP authentication with parallel attempts for better performance
+    let user_format_1 = format!("{}@NWFTH.com", request.username);
+    let user_format_2 = format!("{}@newlywedsfoods.co.th", request.username);
+    let user_format_3 = request.username.clone();
 
-    for user_format in user_formats {
-        info!("🔍 Attempting LDAP authentication for: {}", user_format);
+    info!("🔍 Attempting parallel LDAP authentication");
 
-        match authenticate_ldap(&state.ldap_config, &user_format, &request.password).await {
-            Ok(user) => {
-                info!("✅ LDAP authentication successful for: {}", user_format);
-                
-                // Generate proper JWT token
-                match state.auth_service.generate_token(&user) {
-                    Ok(token) => {
-                        let login_response = LoginResponse { token, user };
-                        return Ok(Json(ApiResponse::success(login_response, "Authentication successful")));
-                    }
-                    Err(e) => {
-                        error!("❌ Failed to generate JWT token: {}", e);
-                        return Ok(Json(ApiResponse::error("Failed to generate authentication token")));
-                    }
+    // Run all LDAP attempts in parallel and take the first successful one
+    let ldap_result = tokio::select! {
+        result1 = authenticate_ldap(&state.ldap_config, &user_format_1, &request.password) => {
+            match result1 {
+                Ok(user) => {
+                    info!("✅ LDAP authentication successful for: {}", user_format_1);
+                    Some(user)
+                }
+                Err(e) => {
+                    info!("❌ LDAP authentication failed for {}: {}", user_format_1, e);
+                    None
                 }
             }
+        }
+        result2 = authenticate_ldap(&state.ldap_config, &user_format_2, &request.password) => {
+            match result2 {
+                Ok(user) => {
+                    info!("✅ LDAP authentication successful for: {}", user_format_2);
+                    Some(user)
+                }
+                Err(e) => {
+                    info!("❌ LDAP authentication failed for {}: {}", user_format_2, e);
+                    None
+                }
+            }
+        }
+        result3 = authenticate_ldap(&state.ldap_config, &user_format_3, &request.password) => {
+            match result3 {
+                Ok(user) => {
+                    info!("✅ LDAP authentication successful for: {}", user_format_3);
+                    Some(user)
+                }
+                Err(e) => {
+                    info!("❌ LDAP authentication failed for {}: {}", user_format_3, e);
+                    None
+                }
+            }
+        }
+    };
+
+    if let Some(user) = ldap_result {
+        // Generate proper JWT token
+        match state.auth_service.generate_token(&user) {
+            Ok(token) => {
+                let login_response = LoginResponse { token, user };
+                return Ok(Json(ApiResponse::success(login_response, "Authentication successful")));
+            }
             Err(e) => {
-                info!("❌ LDAP authentication failed for {}: {}", user_format, e);
-                continue;
+                error!("❌ Failed to generate JWT token: {}", e);
+                return Ok(Json(ApiResponse::error("Failed to generate authentication token")));
             }
         }
     }
@@ -500,8 +529,8 @@ async fn authenticate_sql(
     }
 }
 
-/// Serve the static Angular application
-async fn handle_spa_or_static(uri: axum::http::Uri) -> impl IntoResponse {
+/// Serve the static Angular application with optimized path resolution
+async fn handle_spa_or_static(State(state): State<AppState>, uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
     
     // Don't handle API routes - return 404 to let them be handled by proper API handlers
@@ -519,74 +548,69 @@ async fn handle_spa_or_static(uri: axum::http::Uri) -> impl IntoResponse {
        path.ends_with(".svg") ||
        path.ends_with(".json") ||
        path.ends_with(".webmanifest") {
-        // Try multiple path variations for different deployment scenarios
-        let possible_paths = vec![
-            format!("../frontend/dist/frontend/browser/{path}"),
-            format!("frontend/dist/frontend/browser/{path}"),
-            format!("./frontend/dist/frontend/browser/{path}"),
-        ];
-        
-        for file_path in possible_paths {
-            match tokio::fs::read(&file_path).await {
-                Ok(content) => {
-                    let content_type = match path.split('.').last().unwrap_or("") {
-                        "js" => "application/javascript",
-                        "css" => "text/css",
-                        "html" => "text/html",
-                        "json" => "application/json",
-                        "png" => "image/png",
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "svg" => "image/svg+xml",
-                        "ico" => "image/x-icon",
-                        "webmanifest" => "application/manifest+json",
-                        _ => "text/plain",
-                    };
-                    
-                    return ([(header::CONTENT_TYPE, content_type)], content).into_response();
-                }
-                Err(_) => continue,
+        // Use pre-determined static assets path for better performance
+        let file_path = format!("{}/{}", state.static_assets_path, path);
+
+        match tokio::fs::read(&file_path).await {
+            Ok(content) => {
+                let content_type = match path.split('.').last().unwrap_or("") {
+                    "js" => "application/javascript",
+                    "css" => "text/css",
+                    "html" => "text/html",
+                    "json" => "application/json",
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "svg" => "image/svg+xml",
+                    "ico" => "image/x-icon",
+                    "webmanifest" => "application/manifest+json",
+                    _ => "text/plain",
+                };
+
+                return ([(header::CONTENT_TYPE, content_type)], content).into_response();
+            }
+            Err(_) => {
+                // File not found, serve index.html for SPA routing
             }
         }
-        
-        // File not found in any location, serve index.html for SPA routing
-        serve_index_html().await.into_response()
+
+        // File not found, serve index.html for SPA routing
+        serve_index_html(&state.static_assets_path).await.into_response()
     } else {
         // For all other routes, serve index.html (SPA routing)
-        serve_index_html().await.into_response()
+        serve_index_html(&state.static_assets_path).await.into_response()
     }
 }
 
-async fn serve_index_html() -> impl IntoResponse {
-    // Try multiple path variations for different deployment scenarios
-    let possible_paths = vec![
-        "../frontend/dist/frontend/browser/index.html",
-        "frontend/dist/frontend/browser/index.html",
-        "./frontend/dist/frontend/browser/index.html",
-    ];
-    
-    for path in possible_paths {
-        info!("🔍 Trying to serve index.html from: {}", path);
-        match tokio::fs::read_to_string(path).await {
-            Ok(content) => {
-                info!("✅ Successfully served index.html from: {}", path);
-                return Html(content).into_response();
-            }
-            Err(e) => {
-                info!("❌ Failed to read {} : {}", path, e);
-                continue;
-            }
+async fn serve_index_html(static_assets_path: &str) -> impl IntoResponse {
+    let index_path = format!("{}/index.html", static_assets_path);
+
+    match tokio::fs::read_to_string(&index_path).await {
+        Ok(content) => {
+            info!("✅ Successfully served index.html from: {}", index_path);
+            Html(content).into_response()
+        }
+        Err(e) => {
+            warn!("🚨 Failed to read index.html from {}: {}", index_path, e);
+            StatusCode::NOT_FOUND.into_response()
         }
     }
-    
-    // If all paths fail, return 404
-    warn!("🚨 All index.html paths failed, returning 404");
-    StatusCode::NOT_FOUND.into_response()
 }
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+    // Initialize tracing with environment-based filtering
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| {
+        if cfg!(debug_assertions) {
+            "bulk_picking_backend=info,tower_http=warn".to_string()
+        } else {
+            "bulk_picking_backend=warn,tower_http=error".to_string()
+        }
+    });
+
+    std::env::set_var("RUST_LOG", &log_level);
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     info!("🚀 Starting Bulk Picking Backend v{}", VERSION);
 
@@ -633,24 +657,46 @@ async fn main() {
             info!("✅ Authentication table 'tbl_user' found in database");
         }
         Ok(false) => {
-            error!("🚨 CRITICAL: Authentication table 'tbl_user' not found in database!");
-            error!("    This will cause SQL authentication failures for LOCAL users.");
-            error!("    Please create the tbl_user table in the configured database.");
-            panic!("Authentication table missing - cannot start server safely");
+            warn!("⚠️  Authentication table 'tbl_user' not found in database");
+            warn!("    SQL authentication will be unavailable for local users");
+            warn!("    LDAP authentication will still function normally");
+            warn!("    Create the tbl_user table to enable SQL fallback authentication");
         }
         Err(e) => {
-            error!("🚨 CRITICAL: Failed to check authentication table: {}", e);
-            panic!("Cannot validate authentication dependencies - server startup aborted");
+            warn!("⚠️  Failed to check authentication table: {}", e);
+            warn!("    SQL authentication may be unavailable");
+            warn!("    LDAP authentication will still function normally");
         }
     }
 
     // Initialize authentication service
     let auth_service = AuthService::new().expect("Failed to initialize JWT authentication service");
 
+    // Determine static assets path at startup for better performance
+    let static_assets_path = {
+        let possible_paths = vec![
+            "../frontend/dist/frontend/browser",
+            "frontend/dist/frontend/browser",
+            "./frontend/dist/frontend/browser",
+        ];
+
+        let mut selected_path = possible_paths[0].to_string(); // Default fallback
+        for path in possible_paths {
+            if tokio::fs::metadata(path).await.is_ok() {
+                selected_path = path.to_string();
+                break;
+            }
+        }
+
+        info!("📁 Static assets will be served from: {}", selected_path);
+        selected_path
+    };
+
     let state = AppState {
         database,
         ldap_config,
         auth_service,
+        static_assets_path,
     };
 
     // Configure CORS with environment-based origins

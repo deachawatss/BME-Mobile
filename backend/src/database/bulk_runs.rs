@@ -1467,7 +1467,7 @@ impl Database {
         let current_ingredient = ingredients.iter()
             .find(|ingredient| {
                 ingredient.to_picked_bulk_qty > BigDecimal::from(0) &&
-                ingredient.to_picked_bulk_qty > ingredient.picked_bulk_qty.clone().unwrap_or(BigDecimal::from(0))
+                ingredient.to_picked_bulk_qty > *ingredient.picked_bulk_qty.as_ref().unwrap_or(&BigDecimal::from(0))
             })
             .or_else(|| ingredients.first())
             .ok_or_else(|| anyhow::anyhow!("No ingredients available for run {}", run_no))?;

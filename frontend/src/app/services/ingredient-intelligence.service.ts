@@ -119,7 +119,6 @@ export class IngredientIntelligenceService {
         }),
         tap(statuses => {
           this.ingredientStatusesSubject.next(statuses);
-          console.log(`📊 Updated ingredient statuses for run ${runNo}:`, statuses);
         })
       );
   }
@@ -139,7 +138,6 @@ export class IngredientIntelligenceService {
           throw new Error(response.message || 'Failed to get available ingredients');
         }),
         tap(ingredients => {
-          console.log(`🔍 Retrieved ${ingredients.length} available ingredients for search (hiding completed: ${hideCompleted})`);
         })
       );
   }
@@ -159,7 +157,6 @@ export class IngredientIntelligenceService {
         }),
         tap(coordinationState => {
           this.coordinationStateSubject.next(coordinationState);
-          console.log(`🎯 Initialized run coordination for ${coordinationState.total_ingredients} ingredients, current: ${coordinationState.current_ingredient}`);
         })
       );
   }
@@ -182,10 +179,7 @@ export class IngredientIntelligenceService {
           this.coordinationStateSubject.next(switchResponse.coordination_state);
           
           if (switchResponse.switch_decision.should_switch) {
-            console.log(`🔄 Auto-switching: ${switchResponse.switch_decision.current_ingredient} → ${switchResponse.switch_decision.next_ingredient}`);
-            console.log(`📈 Switch reason: ${switchResponse.switch_decision.switch_reason}`);
           } else {
-            console.log(`⏳ Continue current ingredient: ${switchResponse.switch_decision.switch_reason}`);
           }
         })
       );
@@ -205,7 +199,6 @@ export class IngredientIntelligenceService {
           throw new Error(response.message || 'Failed to get lot optimization');
         }),
         tap(optimization => {
-          console.log(`🎯 Lot optimization: ${Object.keys(optimization.ingredient_lot_assignments).length} ingredients, ${Object.keys(optimization.lot_ingredient_usage).length} lots`);
         })
       );
   }
@@ -225,9 +218,7 @@ export class IngredientIntelligenceService {
         }),
         tap(nextIngredient => {
           if (nextIngredient) {
-            console.log(`➡️ Next recommended ingredient: ${nextIngredient}`);
           } else {
-            console.log(`✅ All ingredients completed for run ${runNo}`);
           }
         })
       );
@@ -247,7 +238,6 @@ export class IngredientIntelligenceService {
           throw new Error(response.message || 'Failed to get run completion metrics');
         }),
         tap(metrics => {
-          console.log(`📊 Run ${runNo} metrics: ${metrics.overall_completion_percentage.toFixed(1)}% complete (${metrics.completed_ingredients}/${metrics.total_ingredients} ingredients)`);
         })
       );
   }

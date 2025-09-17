@@ -540,7 +540,6 @@ export class BulkRunsService {
       .pipe(
         tap((response: ApiResponse<BulkRunStatusResponse>) => {
           if (response.success) {
-            console.log(`✅ Run ${runNo} status: ${response.data?.status}`);
           }
         }),
         catchError(error => {
@@ -705,7 +704,6 @@ export class BulkRunsService {
   refreshInventoryStatus(itemKey: string, expectedQty?: number): void {
     this.getInventoryAlerts(itemKey, expectedQty).subscribe({
       next: (response) => {
-        console.log('Inventory status refreshed for', itemKey);
       },
       error: (error) => {
         console.warn('Failed to refresh inventory status:', error);
@@ -760,7 +758,6 @@ export class BulkRunsService {
 
     // RACE CONDITION FIX: Check if loading is already in progress for this ingredient
     if (this.ingredientLoadingMutex.get(mutexKey)) {
-      console.log(`🔒 INGREDIENT_MUTEX: Loading already in progress for ${itemKey} in run ${runNo} - returning cached data`);
 
       // Return current form data if available, otherwise throw error
       const currentData = this.currentFormData();
@@ -780,7 +777,6 @@ export class BulkRunsService {
     this.isLoading.set(true);
     this.errorMessage.set(null);
 
-    console.log(`🔒 INGREDIENT_MUTEX: Starting protected load for ingredient ${itemKey} in run ${runNo}`);
 
     // Get the correct ingredient index using the dedicated endpoint
     return this.http.get<ApiResponse<number>>(`${this.baseUrl}/${runNo}/ingredient-index?item_key=${itemKey}`).pipe(
@@ -790,7 +786,6 @@ export class BulkRunsService {
         }
 
         const ingredientIndex = indexResponse.data;
-        console.log(`🔧 SERVICE: Resolved ingredient ${itemKey} to index ${ingredientIndex}`);
 
         // Get the form data for the resolved ingredient index
         return this.getBulkRunFormData(runNo, ingredientIndex);
@@ -799,13 +794,11 @@ export class BulkRunsService {
         try {
           this.isLoading.set(false);
           if (response.success && response.data) {
-            console.log(`🔧 SERVICE: loadIngredientByItemKey returning data for ingredient: ${response.data.form_data.item_key}`);
             this.currentFormData.set(response.data);
           }
         } finally {
           // Always release the mutex
           this.ingredientLoadingMutex.delete(mutexKey);
-          console.log(`🔓 INGREDIENT_MUTEX: Released mutex for ${itemKey} in run ${runNo}`);
         }
       }),
       catchError(error => {
@@ -815,7 +808,6 @@ export class BulkRunsService {
 
         // Always release the mutex on error
         this.ingredientLoadingMutex.delete(mutexKey);
-        console.log(`🔓 INGREDIENT_MUTEX: Released mutex (error) for ${itemKey} in run ${runNo}`);
 
         return throwError(() => new Error(errorMsg));
       })
@@ -837,7 +829,6 @@ export class BulkRunsService {
       tap((response: ApiResponse<BulkRunFormData>) => {
         this.isLoading.set(false);
         if (response.success && response.data) {
-          console.log(`🔧 SERVICE: loadIngredientByItemKeyAndCoordinates returning data for ingredient: ${response.data.form_data.item_key}, RowNum: ${rowNum}, LineId: ${lineId}`);
           this.currentFormData.set(response.data);
         }
       }),
@@ -1090,7 +1081,6 @@ export class BulkRunsService {
       headers: this.getAuthHeaders()
     };
     
-    console.log('🔐 Sending pick confirmation with user:', currentUser?.username);
 
     return this.http.post<ApiResponse<any>>(url, requestBody, httpOptions)
       .pipe(
@@ -1247,13 +1237,11 @@ export class BulkRunsService {
       headers: this.getAuthHeaders()
     };
 
-    console.log(`🔄 SERVICE: Requesting status revert for run ${runNo}`);
 
     return this.http.post<ApiResponse<BulkRunStatusResponse>>(url, {}, httpOptions)
       .pipe(
         tap((response: ApiResponse<BulkRunStatusResponse>) => {
           if (response.success) {
-            console.log(`✅ SERVICE: Successfully reverted run ${runNo} status to NEW`);
             // Update the current run status signal if the response contains updated status
             if (response.data) {
               // Note: We don't have access to currentRunStatus signal from the component here,
@@ -1281,7 +1269,6 @@ export class BulkRunsService {
     completed_count: number;
     total_ingredients: number;
   }>> {
-    console.log(`🔍 SERVICE: Checking detailed run completion for run ${runNo}`);
 
     return this.http.get<ApiResponse<{
       is_complete: boolean;
@@ -1292,13 +1279,10 @@ export class BulkRunsService {
       headers: this.getAuthHeaders()
     }).pipe(
       tap(response => {
-        console.log(`🔍 DEBUG: Raw API response:`, response);
         if (response.success && response.data) {
           const { is_complete, incomplete_count, completed_count, total_ingredients } = response.data;
-          console.log(`📊 SERVICE: Run ${runNo} completion - ${completed_count}/${total_ingredients} complete (${incomplete_count} remaining)`);
 
           if (is_complete) {
-            console.log(`🎉 SERVICE: Run ${runNo} is COMPLETE! All ingredients finished.`);
           }
         }
       }),
@@ -1315,7 +1299,6 @@ export class BulkRunsService {
    * Final step in automatic run completion workflow
    */
   updateRunStatusToPrint(runNo: number): Observable<ApiResponse<{ oldStatus: string; newStatus: string }>> {
-    console.log(`🔄 SERVICE: Updating run ${runNo} status to PRINT`);
 
     return this.http.put<ApiResponse<{ oldStatus: string; newStatus: string }>>(
       `${this.baseUrl}/${runNo}/complete`,
@@ -1324,7 +1307,6 @@ export class BulkRunsService {
     ).pipe(
       tap(response => {
         if (response.success) {
-          console.log(`✅ SERVICE: Run ${runNo} status successfully updated to PRINT`);
         } else {
           console.warn(`⚠️ SERVICE: Failed to update run ${runNo} status: ${response.message}`);
         }

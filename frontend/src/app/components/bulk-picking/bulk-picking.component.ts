@@ -5022,8 +5022,7 @@ export class BulkPickingComponent implements AfterViewInit {
 
   // Print functionality methods
   showMessage(message: string): void {
-    console.log('[BulkPicking]', message);
-    // TODO: Replace with proper toast/notification service
+    alert(message);
   }
 
   printLabelsDirectly(): void {
@@ -5319,61 +5318,7 @@ export class BulkPickingComponent implements AfterViewInit {
     return completedCount;
   }
 
-  private transformFormDataToPickedItems(formData: BulkRunFormData): any[] {
-    // Get pallet data which contains all the picked information
-    const palletData = this.palletData();
-    if (!palletData || palletData.length === 0) {
-      return [];
-    }
 
-    const pickedItems: any[] = [];
-    const currentIngredient = formData.current_ingredient;
-
-    // Create picked items from pallet data for current ingredient
-    for (const pallet of palletData) {
-      if (pallet.no_of_bags_picked && pallet.no_of_bags_picked > 0) {
-        const pickedItem = {
-          run_no: formData.run.run_no,
-          batch_no: pallet.batch_number || `Batch-${pallet.row_num}`, // Use actual batch_number from pallet
-          line_id: currentIngredient?.ingredient?.line_id || 1,
-          item_key: currentIngredient?.ingredient?.item_key || '',
-          picked_bulk_qty: pallet.no_of_bags_picked, // Use actual bag count instead of weight
-          picked_qty: pallet.quantity_picked || 0, // Keep weight for total quantity display
-          unit: currentIngredient?.ingredient?.uom || 'KG',
-          pack_size: currentIngredient?.ingredient?.pack_size || 20,
-          modified_by: this.getCurrentUser()?.username || 'SYSTEM',
-          picking_date: new Date().toISOString(),
-          // Add lot and bin info if available - will be enhanced in next step
-          lot_no: this.productionForm?.get('suggestedLotNumber')?.value || '',
-          bin_no: this.productionForm?.get('suggestedBinNumber')?.value || '',
-          // Additional fields for print labels
-          description: currentIngredient?.ingredient?.description || '',
-          row_num: pallet.row_num,
-          pallet_number: pallet.pallet_number
-        };
-        
-        // Debug logging for picked item
-        console.log('🔍 PICKED ITEM DEBUG:', {
-          batchNo: pickedItem.batch_no,
-          itemKey: pickedItem.item_key,
-          lotNo: pickedItem.lot_no,
-          binNo: pickedItem.bin_no,
-          formSuggestedLot: formData.form_data?.suggestedLotNumber,
-          formSuggestedBin: formData.form_data?.suggestedBinNumber
-        });
-        
-        pickedItems.push(pickedItem);
-      }
-    }
-
-    return pickedItems;
-  }
-
-  private getCurrentUser(): any {
-    // This should get the current user from auth service
-    // For now returning null to use fallback logic in print service
-    return null;
-  }
 
   /**
    * Fetch complete run data including ALL ingredients and picked lots
@@ -5407,27 +5352,6 @@ export class BulkPickingComponent implements AfterViewInit {
     }
   }
 
-  private getCompletedBatchesFromFormData(formData: BulkRunFormData): string[] {
-    // Check if there are any pallets with picked bags
-    const palletData = this.palletData();
-    if (!palletData || palletData.length === 0) return [];
-    
-    const completedBatches: string[] = [];
-    const uniqueBatches = new Set<string>();
-    
-    for (const pallet of palletData) {
-      if (pallet.no_of_bags_picked && pallet.no_of_bags_picked > 0) {
-        // Use actual batch_number from pallet data instead of pallet_number
-        const batchNo = pallet.batch_number || `Batch-${pallet.row_num}`;
-        if (!uniqueBatches.has(batchNo)) {
-          uniqueBatches.add(batchNo);
-          completedBatches.push(batchNo);
-        }
-      }
-    }
-    
-    return completedBatches.sort();
-  }
 
   /**
    * Transform complete run data (all ingredients + picked lots) into print format

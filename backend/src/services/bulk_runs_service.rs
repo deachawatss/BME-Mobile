@@ -109,9 +109,8 @@ impl BulkRunsService {
             let ingredients = self.database.get_bulk_run_ingredients(run_no).await?;
             
             // Use database DESC ordering (LineId DESC) to match search modal and ensure consistent indexing
-            let sorted_ingredients = ingredients.clone();
-            
-            if let Some(selected_ingredient) = sorted_ingredients.get(idx as usize) {
+
+            if let Some(selected_ingredient) = ingredients.get(idx as usize) {
                 info!("Manual ingredient selection: index {} maps to ItemKey: {}, LineId: {}", 
                       idx, selected_ingredient.item_key, selected_ingredient.line_id);
                 

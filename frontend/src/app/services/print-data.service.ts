@@ -289,19 +289,10 @@ export class PrintDataService {
    * Print labels using existing component data (no API call needed)
    */
   printLabelsFromComponentData(runData: any, pickedItems: any[], completedBatches: string[]): void {
-    // Debug logging for incoming data
-    console.log('🔍 PRINT SERVICE DEBUG - Received Data:', {
-      runData: runData,
-      suggestedLot: runData.suggested_lot,
-      suggestedBin: runData.suggested_bin,
-      pickedItems: pickedItems,
-      completedBatches: completedBatches
-    });
     
     // Fetch lot details and then print
     this.getLotPickingDetails(runData.run_no).subscribe({
       next: (lotDetails) => {
-        console.log('🔍 PRINT SERVICE DEBUG - API Success:', { lotDetails });
         const printData: PrintLabelData = {
           runData: runData,
           pickedItems: pickedItems,
@@ -313,7 +304,6 @@ export class PrintDataService {
       },
       error: (error) => {
         console.warn('Could not fetch lot details, printing without them:', error);
-        console.log('🔍 PRINT SERVICE DEBUG - Using Fallback Data');
         // Fallback: print without lot details
         const printData: PrintLabelData = {
           runData: runData,
@@ -428,15 +418,6 @@ export class PrintDataService {
       const bags = lotDetail.qty_received && lotDetail.pack_size > 0
         ? Math.ceil(lotDetail.qty_received / lotDetail.pack_size)
         : Math.ceil(this.parseQuantity(lotDetail.picked_bulk_qty));
-
-      // Debug logging for data resolution
-      console.log(`🔍 PRINT DEBUG - Item: ${lotDetail.item_key}, Lot: ${lotDetail.lot_no}, Batch: ${batchNo}`, {
-        qtyReceived: lotDetail.qty_received,
-        packSize: lotDetail.pack_size,
-        calculatedBags: bags,
-        pickedBulkQty: lotDetail.picked_bulk_qty,
-        binNo: lotDetail.bin_no
-      });
 
       return {
         itemNo: lotDetail.item_key,

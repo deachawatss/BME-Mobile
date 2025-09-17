@@ -155,7 +155,6 @@ export class WorkflowStateMachineService {
    * Initialize workflow for a new run
    */
   initializeWorkflow(runNo: number): void {
-    console.log(`🔧 Initializing workflow state machine for run ${runNo}`);
     
     const initialContext: WorkflowContext = {
       runNo,
@@ -215,7 +214,6 @@ export class WorkflowStateMachineService {
     this.currentStateSubject.next(transition.to);
     this.currentState.set(transition.to);
 
-    console.log(`✅ State transition: ${currentState} --${event}--> ${transition.to}`);
     return true;
   }
 
@@ -299,7 +297,6 @@ export class WorkflowStateMachineService {
       );
 
       if (shouldAutoSwitch.shouldSwitch) {
-        console.log(`🔄 Auto-switching triggered: ${shouldAutoSwitch.reason}`);
         
         // Transition to ingredient switching
         const success = this.transitionToState('INGREDIENT_SWITCHING', 'COMPLETE_BATCH', {
@@ -468,7 +465,6 @@ export class WorkflowStateMachineService {
    * Reset workflow to initial state
    */
   resetWorkflow(): void {
-    console.log('🔄 Resetting workflow state machine');
     this.transitionToState('INITIALIZATION', 'RESET_WORKFLOW');
   }
 
