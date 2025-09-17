@@ -25,8 +25,8 @@ export class ConfigService {
       enableDebug: environment.enableDebug
     };
 
-    if (this.config.enableDebug) {
-      console.log('App Configuration:', this.config);
+    if (this.config.enableDebug && !this.config.production) {
+      console.log('[ConfigService] ℹ️ App Configuration:', this.config);
     }
   }
 

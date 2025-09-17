@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ConfigService } from './config.service';
+import { DebugService } from './debug.service';
 
 export interface User {
   username: string;
@@ -55,7 +56,8 @@ export class AuthService {
 
   constructor(
     private http: HttpClient,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private debug: DebugService
   ) {
     this.initializeAuth();
   }
@@ -104,7 +106,7 @@ export class AuthService {
     this.currentUserSubject.next(null);
     this.isAuthenticatedSubject.next(false);
     this.sessionExpiryWarningShown = false;
-    console.log('🔒 User logged out and session cleared');
+    this.debug.info('AuthService', 'User logged out and session cleared');
   }
 
   testConnection(): Observable<boolean> {

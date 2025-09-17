@@ -6,6 +6,7 @@ import { BulkRunsService, BulkRunFormData, BulkRunSearchResponse, InventoryStatu
 import { BangkokTimezoneService } from '../../services/bangkok-timezone.service';
 import { PrintDataService, PrintLabelData } from '../../services/print-data.service';
 import { RunStatusManager, StatusTrigger } from '../../services/run-status-manager';
+import { DebugService } from '../../services/debug.service';
 import { HttpClientModule } from '@angular/common/http';
 import { debounceTime, distinctUntilChanged, tap, catchError } from 'rxjs/operators';
 import { Observable, throwError } from 'rxjs';
@@ -1587,6 +1588,7 @@ export class BulkPickingComponent implements AfterViewInit {
   private printDataService = inject(PrintDataService);
   private runStatusManager = inject(RunStatusManager);
   private cdr = inject(ChangeDetectorRef);
+  private debug = inject(DebugService);
 
   // Reactive signals for state management
   isSearchingRun = signal(false);
@@ -1900,11 +1902,11 @@ export class BulkPickingComponent implements AfterViewInit {
   }
   
   private loadFormData(runNo: number, ingredientIndex?: number): void {
-    console.log(`🔄 LOAD FORM DATA: Called for run ${runNo}, ingredient index: ${ingredientIndex}, manual selection active: ${this.manualIngredientSelection()}`);
+    this.debug.stateChange('BulkPicking', `LOAD FORM DATA: Called for run ${runNo}, ingredient index: ${ingredientIndex}, manual selection active: ${this.manualIngredientSelection()}`);
     
     // Skip if manual ingredient selection is active
     if (this.manualIngredientSelection()) {
-      console.log(`🚫 BLOCKING loadFormData: Manual ingredient selection is active`);
+      this.debug.warn('BulkPicking', `BLOCKING loadFormData: Manual ingredient selection is active`);
       return;
     }
     
@@ -1954,7 +1956,7 @@ export class BulkPickingComponent implements AfterViewInit {
           });
           
           this.palletData.set(validPallets);
-          console.log(`✅ PALLET DATA: Successfully loaded ${validPallets.length} pallets for run ${runNo}`);
+          this.debug.info('BulkPicking', `PALLET DATA: Successfully loaded ${validPallets.length} pallets for run ${runNo}`);
           // Note: Don't update remaining calculations here as API provides correct per-ingredient values
           // this.updateRemainingCalculations();
         } else {
@@ -1989,7 +1991,7 @@ export class BulkPickingComponent implements AfterViewInit {
 
     // INFINITE LOOP FIX: Prevent multiple simultaneous loads for same ingredient
     if (this.palletLoadingStates.get(loadKey)) {
-      console.log(`⏸️ LOAD BLOCKED: Already loading pallet data for ${itemKey || 'default'} - preventing duplicate request`);
+      this.debug.debug('BulkPicking', `LOAD BLOCKED: Already loading pallet data for ${itemKey || 'default'} - preventing duplicate request`);
       return;
     }
 
@@ -1997,17 +1999,17 @@ export class BulkPickingComponent implements AfterViewInit {
     this.palletLoadingStates.set(loadKey, true);
 
     // DEFENSIVE LOGGING: Track which ingredient's pallet data is being loaded
-    console.log(`🔄 PALLET DATA LOAD: Loading pallet data for run ${runNo}, ingredient: ${itemKey || 'default/first'}`);
+    this.debug.stateChange('BulkPicking', `PALLET DATA LOAD: Loading pallet data for run ${runNo}, ingredient: ${itemKey || 'default/first'}`);
 
     this.loadPalletTrackingDataObservable(runNo, itemKey).subscribe({
       next: () => {
-        console.log(`✅ PALLET DATA LOADED: Successfully loaded pallet data for ingredient: ${itemKey || 'default/first'}`);
+        this.debug.info('BulkPicking', `PALLET DATA LOADED: Successfully loaded pallet data for ingredient: ${itemKey || 'default/first'}`);
 
         // CRITICAL FIX: Recalculate remaining quantities after fresh pallet data loads
         // This ensures "Remaining to Pick" field updates with correct pallet-based values
         const currentItemKey = this.productionForm.get('itemKey')?.value;
         if (currentItemKey === itemKey) {
-          console.log(`🔄 FRESH DATA: Recalculating remaining quantities for ${itemKey}`);
+          this.debug.stateChange('BulkPicking', `FRESH DATA: Recalculating remaining quantities for ${itemKey}`);
           this.calculateRemainingQuantities();
         }
 
@@ -2041,7 +2043,7 @@ export class BulkPickingComponent implements AfterViewInit {
   private populateForm(formData: BulkRunFormData): void {
     const fields = formData.form_data;
     
-    console.log(`📝 POPULATE FORM: Loading ingredient ${fields.item_key}, manual selection active: ${this.manualIngredientSelection()}`);
+    this.debug.debug('BulkPicking', `POPULATE FORM: Loading ingredient ${fields.item_key}, manual selection active: ${this.manualIngredientSelection()}`);
     
     // Format decimal values to 4 decimal places
     const formatDecimal = (value: string | number): string => {
@@ -2105,10 +2107,10 @@ export class BulkPickingComponent implements AfterViewInit {
             suggestedLotNumber: suggestedLot.lot_no,
             suggestedBinNumber: suggestedLot.bin_no
           });
-          console.log(`✅ SUGGEST LOT: Using lot search API - Lot: ${suggestedLot.lot_no}, Bin: ${suggestedLot.bin_no}`);
+          this.debug.info('BulkPicking', `SUGGEST LOT: Using lot search API - Lot: ${suggestedLot.lot_no}, Bin: ${suggestedLot.bin_no}`);
         } else {
           // No suitable lot found - same result as lot search modal would show
-          console.log(`⚠️ SUGGEST LOT: No suitable lots found for item ${itemKey} (consistent with lot search)`);
+          this.debug.warn('BulkPicking', `SUGGEST LOT: No suitable lots found for item ${itemKey} (consistent with lot search)`);
         }
       },
       error: (error) => {
@@ -2260,7 +2262,7 @@ export class BulkPickingComponent implements AfterViewInit {
           // Refresh pallet tracking data for the run
           this.loadPalletTrackingData(runNo, newItemKey);
           
-          console.log('Navigated to next ingredient:', newItemKey);
+          this.debug.debug('BulkPicking', 'Navigated to next ingredient:', newItemKey);
         } else {
           // Run is complete or no next ingredient
           this.errorMessage.set('No more ingredients in this run');
@@ -2302,7 +2304,7 @@ export class BulkPickingComponent implements AfterViewInit {
             // Refresh pallet tracking data for the run
             this.loadPalletTrackingData(runNo, newItemKey);
             
-            console.log('Navigated to previous ingredient:', newItemKey);
+            this.debug.debug('BulkPicking', 'Navigated to previous ingredient:', newItemKey);
           } else {
             this.errorMessage.set(response.message || 'Failed to navigate to previous ingredient');
           }
@@ -2364,7 +2366,7 @@ export class BulkPickingComponent implements AfterViewInit {
         if (response.success && response.data) {
           // Show ALL ingredients (both complete and incomplete) for full visibility
           this.itemSearchResults.set(response.data);
-          console.log(`All ingredients loaded: ${response.data.length} ingredients available`);
+          this.debug.debug('BulkPicking', `All ingredients loaded: ${response.data.length} ingredients available`);
         } else {
           this.itemSearchResults.set([]);
           this.itemSearchError.set(response.message || 'No items found for this run');
@@ -2394,7 +2396,7 @@ export class BulkPickingComponent implements AfterViewInit {
     this.manualIngredientSelection.set(true);
     // Clear any existing timeout since user is actively selecting
     this.clearManualSelectionTimeout();
-    console.log(`🎯 MANUAL SELECTION: User manually selected ${item.item_key}, blocking auto-switching`);
+    this.debug.debug('BulkPicking', `MANUAL SELECTION: User manually selected ${item.item_key}, blocking auto-switching`);
     
     // Load form data for the selected ingredient
     this.bulkRunsService.loadIngredientByItemKey(runNo, item.item_key).subscribe({
@@ -2409,7 +2411,7 @@ export class BulkPickingComponent implements AfterViewInit {
           // Auto-focus on Lot # field for next step in workflow
           setTimeout(() => this.focusLotNumberField(), 100);
           
-          console.log('Manually switched to ingredient:', item.item_key);
+          this.debug.debug('BulkPicking', 'Manually switched to ingredient:', item.item_key);
         } else {
           this.errorMessage.set(response.message || 'Failed to load ingredient data');
         }
@@ -2529,8 +2531,8 @@ export class BulkPickingComponent implements AfterViewInit {
     const binsForSelectedLot = allSearchResults.filter(result => result.lot_no === lot.lot_no);
     this.availableBinsForLot.set(binsForSelectedLot);
     
-    console.log('Selected lot:', lot.lot_no, 'from bin:', lot.bin_no);
-    console.log('Available bins for lot search:', binsForSelectedLot.map(b => b.bin_no));
+    this.debug.debug('BulkPicking', `Selected lot: ${lot.lot_no} from bin: ${lot.bin_no}`);
+    this.debug.debug('BulkPicking', 'Available bins for lot search:', binsForSelectedLot.map(b => b.bin_no));
   }
 
   // Bin Search Modal Methods
@@ -2546,7 +2548,7 @@ export class BulkPickingComponent implements AfterViewInit {
     this.binSearchError.set(null);
     this.isLoadingBinSearch.set(false);
     
-    console.log(`Opening bin search modal with ${availableBins.length} available bins`);
+    this.debug.debug('BulkPicking', `Opening bin search modal with ${availableBins.length} available bins`);
   }
 
   closeBinSearchModal(): void {
@@ -2556,7 +2558,7 @@ export class BulkPickingComponent implements AfterViewInit {
   }
 
   selectBinFromModal(bin: any): void {
-    console.log('Selected bin from modal:', bin.bin_no);
+    this.debug.debug('BulkPicking', 'Selected bin from modal:', bin.bin_no);
     
     // Close the modal
     this.closeBinSearchModal();
@@ -2566,7 +2568,7 @@ export class BulkPickingComponent implements AfterViewInit {
       binNumber: bin.bin_no
     });
     
-    console.log('Updated form with selected bin:', bin.bin_no);
+    this.debug.debug('BulkPicking', 'Updated form with selected bin:', bin.bin_no);
   }
 
   searchItem(): void {
@@ -2609,7 +2611,7 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
 
-    console.log(`Validating lot number: ${lotNumber} for run: ${runNo}, item: ${itemKey}`);
+    this.debug.debug('BulkPicking', `Validating lot number: ${lotNumber} for run: ${runNo}, item: ${itemKey}`);
     
     // Show loading state
     this.isSearchingLot.set(true);
@@ -2630,8 +2632,8 @@ export class BulkPickingComponent implements AfterViewInit {
           // Auto-focus on bin field for user to continue or search bins
           this.focusBinNumberField();
           
-          console.log(`Lot ${lotNumber} validated successfully. Available bins:`, response.data.length);
-          console.log('Available bins stored for bin search modal:', response.data.map(b => b.bin_no));
+          this.debug.debug('BulkPicking', `Lot ${lotNumber} validated successfully. Available bins:`, response.data.length);
+          this.debug.debug('BulkPicking', 'Available bins stored for bin search modal:', response.data.map(b => b.bin_no));
         } else {
           // Lot not found or not available
           this.errorMessage.set(`Lot ${lotNumber} not found or not available for ${itemKey}`);
@@ -2655,7 +2657,7 @@ export class BulkPickingComponent implements AfterViewInit {
       // You might want to update other fields like SOH based on the lot data
     });
 
-    console.log('Populated form with lot data:', lotData.lot_no, 'bin:', lotData.bin_no);
+    this.debug.debug('BulkPicking', `Populated form with lot data: ${lotData.lot_no} bin: ${lotData.bin_no}`);
   }
 
   clearLotAndBinFields(): void {
@@ -2852,7 +2854,7 @@ export class BulkPickingComponent implements AfterViewInit {
     const currentRowNum = currentFormData.current_ingredient.ingredient.row_num;
     const pallets = this.palletData();
     
-    console.log(`🔍 getCurrentBatchData: Looking for pallet with RowNum ${currentRowNum} from ${pallets.length} pallets`);
+    this.debug.debug('BulkPicking', `getCurrentBatchData: Looking for pallet with RowNum ${currentRowNum} from ${pallets.length} pallets`);
     
     // Sort pallets by batch_number ascending to ensure sequential processing (850828→850829→850830...)
     const sortedPallets = [...pallets].sort((a: any, b: any) => {
@@ -2881,7 +2883,7 @@ export class BulkPickingComponent implements AfterViewInit {
       const remainingBags = parseFloat(currentPallet.no_of_bags_remaining?.toString() || '0');
       const pickedBags = parseFloat(currentPallet.no_of_bags_picked?.toString() || '0');
       
-      console.log(`📊 getCurrentBatchData: Using pallet ${currentPallet.batch_number} (RowNum: ${currentPallet.row_num}) for validation - ${remainingBags} remaining, ${pickedBags} picked`);
+      this.debug.debug('BulkPicking', `getCurrentBatchData: Using pallet ${currentPallet.batch_number} (RowNum: ${currentPallet.row_num}) for validation - ${remainingBags} remaining, ${pickedBags} picked`);
       
       return {
         toPickedBulkQty: remainingBags + pickedBags, // Total capacity of this pallet  
@@ -2948,11 +2950,11 @@ export class BulkPickingComponent implements AfterViewInit {
       const totalNeeded = parseFloat(formData.current_ingredient.calculations.total_needed || '0');
       const pickedSoFar = totalNeeded - remainingBags;
 
-      console.log(`🎯 UNIFIED_STATE: Using same data source as completion logic:`);
-      console.log(`  - Total needed: ${totalNeeded} bags`);
-      console.log(`  - Picked so far: ${pickedSoFar} bags`);
-      console.log(`  - Remaining: ${remainingBags} bags`);
-      console.log(`  - Remaining KG: ${remainingKg} kg`);
+      this.debug.debug('BulkPicking', `UNIFIED_STATE: Using same data source as completion logic:`);
+      this.debug.debug('BulkPicking', `  - Total needed: ${totalNeeded} bags`);
+      this.debug.debug('BulkPicking', `  - Picked so far: ${pickedSoFar} bags`);
+      this.debug.debug('BulkPicking', `  - Remaining: ${remainingBags} bags`);
+      this.debug.debug('BulkPicking', `  - Remaining KG: ${remainingKg} kg`);
 
       // VALIDATION: Check for inconsistencies that could indicate backend calculation errors
       if (remainingBags < 0) {
@@ -3080,7 +3082,7 @@ export class BulkPickingComponent implements AfterViewInit {
     }
     
     // DEFENSIVE LOGGING: Log coordinates being sent to backend for debugging
-    console.log(`🎯 PICK CONFIRMATION: Using FIRST AVAILABLE coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
+    this.debug.debug('BulkPicking', `PICK CONFIRMATION: Using FIRST AVAILABLE coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
     
     // Call pick confirmation API - runNumber and itemKey are already validated above
     this.confirmPickWithBackend({
@@ -3095,11 +3097,11 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Call backend API for pick confirmation
   private confirmPickWithBackend(pickData: any): void {
-    console.log('🔄 Validating data synchronization before pick confirmation...');
+    this.debug.debug('BulkPicking', 'Validating data synchronization before pick confirmation...');
 
     this.bulkRunsService.confirmPick(pickData).subscribe({
       next: (response) => {
-        console.log('✅ Pick confirmation successful:', response);
+        this.debug.info('BulkPicking', 'Pick confirmation successful:', response);
 
         // RACE CONDITION FIX: Single atomic state refresh operation
         this.refreshAllStateAfterPick(pickData.pickedBulkQty, pickData.lotNo, pickData.binNo);
@@ -3153,7 +3155,7 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
     
-    console.log('🔄 Checking if ingredient is complete or has more batches...', currentIngredient);
+    this.debug.debug('BulkPicking', 'Checking if ingredient is complete or has more batches...', currentIngredient);
     
     // Show user-friendly message while checking
     this.errorMessage.set('This batch is already completed. Checking for next available batch or ingredient...');
@@ -3167,12 +3169,12 @@ export class BulkPickingComponent implements AfterViewInit {
           
           if (remainingToPick <= 0.001) {
             // Ingredient is completely finished - switch to next ingredient
-            console.log('✅ Ingredient', currentIngredient, 'is completely finished. Switching to next ingredient...');
+            this.debug.info('BulkPicking', `Ingredient ${currentIngredient} is completely finished. Switching to next ingredient...`);
             this.errorMessage.set('Ingredient completed! Loading next ingredient...');
             this.autoSwitchToNextIngredient(currentIngredient);
           } else {
             // Ingredient still has remaining quantity - load next batch of same ingredient
-            console.log('🔄 Ingredient', currentIngredient, 'still has', remainingToPick, 'remaining. Loading next batch...');
+            this.debug.stateChange('BulkPicking', `Ingredient ${currentIngredient} still has ${remainingToPick} remaining. Loading next batch...`);
             this.currentFormData.set(response.data);
             this.populateForm(response.data);
             
@@ -3181,12 +3183,12 @@ export class BulkPickingComponent implements AfterViewInit {
             
             // Show success notification
             setTimeout(() => {
-              console.log('📢 Ready for picking next batch of', currentIngredient);
+              this.debug.info('BulkPicking', `Ready for picking next batch of ${currentIngredient}`);
             }, 100);
           }
         } else {
           // No data returned - ingredient might be completely finished, try switching
-          console.log('⚠️ No data returned for ingredient', currentIngredient, '- attempting to switch to next ingredient');
+          this.debug.warn('BulkPicking', `No data returned for ingredient ${currentIngredient} - attempting to switch to next ingredient`);
           this.autoSwitchToNextIngredient(currentIngredient);
         }
       },
@@ -3229,7 +3231,7 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
     
-    console.log('🎯 Pallet advancement validation failed - investigating and recovering...', originalError);
+    this.debug.debug('BulkPicking', 'Pallet advancement validation failed - investigating and recovering...', originalError);
     
     // Show user-friendly message while recovering
     this.errorMessage.set('Pallet data synchronization issue detected. Reloading current ingredient...');
@@ -3240,22 +3242,22 @@ export class BulkPickingComponent implements AfterViewInit {
     
     if (currentRowNum && currentLineId) {
       // Try coordinate-specific loading first (more precise)
-      console.log(`🎯 Attempting coordinate-specific reload: ItemKey=${currentIngredient}, RowNum=${currentRowNum}, LineId=${currentLineId}`);
+      this.debug.debug('BulkPicking', `Attempting coordinate-specific reload: ItemKey=${currentIngredient}, RowNum=${currentRowNum}, LineId=${currentLineId}`);
       
       this.bulkRunsService.loadIngredientByItemKeyAndCoordinates(runNumber, currentIngredient, currentRowNum, currentLineId).subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            console.log('✅ Coordinate-specific reload successful');
+            this.debug.info('BulkPicking', 'Coordinate-specific reload successful');
             this.currentFormData.set(response.data);
             this.populateForm(response.data);
             this.errorMessage.set(null);
             
             // Show success notification
             setTimeout(() => {
-              console.log('📢 Pallet data synchronized - ready for picking');
+              this.debug.info('BulkPicking', 'Pallet data synchronized - ready for picking');
             }, 100);
           } else {
-            console.log('⚠️ Coordinate-specific reload failed, falling back to general ingredient reload');
+            this.debug.warn('BulkPicking', 'Coordinate-specific reload failed, falling back to general ingredient reload');
             this.fallbackToIngredientReload(runNumber, currentIngredient);
           }
         },
@@ -3272,17 +3274,17 @@ export class BulkPickingComponent implements AfterViewInit {
 
   // Fallback method for pallet advancement recovery
   private fallbackToIngredientReload(runNumber: string, currentIngredient: string): void {
-    console.log('🔄 Using fallback ingredient reload for pallet advancement recovery');
+    this.debug.stateChange('BulkPicking', 'Using fallback ingredient reload for pallet advancement recovery');
     
     this.bulkRunsService.loadIngredientByItemKey(parseInt(runNumber, 10), currentIngredient).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          console.log('✅ Fallback ingredient reload successful');
+          this.debug.info('BulkPicking', 'Fallback ingredient reload successful');
           this.currentFormData.set(response.data);
           this.populateForm(response.data);
           this.errorMessage.set(null);
         } else {
-          console.log('❌ No more available batches found for ingredient:', currentIngredient);
+          this.debug.warn('BulkPicking', `No more available batches found for ingredient: ${currentIngredient}`);
           this.errorMessage.set('All available pallets for this ingredient appear to be completed. Please select a different ingredient or refresh the run.');
         }
       },
@@ -3303,20 +3305,20 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
     
-    console.log('🔄 Refreshing data and retrying pick confirmation...');
+    this.debug.stateChange('BulkPicking', 'Refreshing data and retrying pick confirmation...');
     
     // Refresh form data and retry once
     this.bulkRunsService.loadIngredientByItemKey(parseInt(runNumber, 10), currentIngredient).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          console.log('✅ Data refreshed, retrying pick confirmation...');
+          this.debug.info('BulkPicking', 'Data refreshed, retrying pick confirmation...');
           this.currentFormData.set(response.data);
           this.populateForm(response.data);
           
           // Retry pick confirmation once
           this.bulkRunsService.confirmPick(pickData).subscribe({
             next: (retryResponse) => {
-              console.log('✅ Retry successful:', retryResponse);
+              this.debug.info('BulkPicking', 'Retry successful', retryResponse);
               // Use atomic refresh instead of multiple separate operations
               this.refreshAllStateAfterPick(pickData.pickedBulkQty, pickData.lotNo, pickData.binNo);
             },
@@ -3393,7 +3395,7 @@ export class BulkPickingComponent implements AfterViewInit {
   // Handle successful pick confirmation with enhanced state management
   // **ATOMIC STATE REFRESH** - Single consolidated refresh operation after pick (RACE CONDITION FIX)
   private refreshAllStateAfterPick(pickedBags: number, lotNumber: string, binNumber: string): void {
-    console.log('🔄 ATOMIC_REFRESH: Starting consolidated state refresh after pick...');
+    this.debug.stateChange('BulkPicking', 'ATOMIC_REFRESH: Starting consolidated state refresh after pick...');
 
     // Clear form state first
     this.productionForm.patchValue({
@@ -3424,7 +3426,7 @@ export class BulkPickingComponent implements AfterViewInit {
           // Step 2: Refresh pallet data
           this.loadPalletTrackingDataObservable(runNumber, currentItemKey).subscribe({
             next: () => {
-              console.log('🔄 ATOMIC_REFRESH: Pallet data refreshed, updating UI components...');
+              this.debug.stateChange('BulkPicking', 'ATOMIC_REFRESH: Pallet data refreshed, updating UI components...');
 
               // Step 3: CRITICAL - Recalculate remaining quantities with fresh data
               this.calculateRemainingQuantities();
@@ -3439,10 +3441,10 @@ export class BulkPickingComponent implements AfterViewInit {
               this.refreshRunStatus();
 
               // Step 6: Check for run completion using centralized manager
-              console.log('🔍 ATOMIC_REFRESH: Triggering completion check via RunStatusManager...');
+              this.debug.debug('BulkPicking', 'ATOMIC_REFRESH: Triggering completion check via RunStatusManager...');
               this.runStatusManager.triggerCompletionCheck(runNumber, StatusTrigger.AFTER_PICK);
 
-              console.log(`✅ ATOMIC_REFRESH: Complete state refresh finished - ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
+              this.debug.info('BulkPicking', `ATOMIC_REFRESH: Complete state refresh finished - ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
             },
             error: (palletError: any) => {
               console.error('⚠️ ATOMIC_REFRESH: Failed to refresh pallet data:', palletError);
@@ -3495,7 +3497,7 @@ export class BulkPickingComponent implements AfterViewInit {
             // CRITICAL FIX: Refresh pallet data FIRST, then update UI
             this.loadPalletTrackingDataObservable(runNumber, currentItemKey).subscribe({
               next: () => {
-                console.log('🔄 Pallet data refreshed after pick, now updating UI...');
+                this.debug.stateChange('BulkPicking', 'Pallet data refreshed after pick, now updating UI...');
                 
                 // Check if current pallet is completed and advance to next pallet if needed
                 this.checkPalletCompletionAndAdvance();
@@ -3511,7 +3513,7 @@ export class BulkPickingComponent implements AfterViewInit {
                 // Refresh run status for status flag
                 this.refreshRunStatus();
                 
-                console.log(`✅ Pick confirmed and UI state updated: ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
+                this.debug.info('BulkPicking', `Pick confirmed and UI state updated: ${pickedBags} bags from lot ${lotNumber} in bin ${binNumber}`);
               },
               error: (palletError: any) => {
                 console.error('⚠️ Failed to refresh pallet data after pick:', palletError);
@@ -3630,33 +3632,31 @@ export class BulkPickingComponent implements AfterViewInit {
     const runNumber = this.productionForm.get('runNumber')?.value;
     
     if (!runNumber) {
-      console.log('No run number available for ingredient switching');
+      this.debug.warn('BulkPicking', 'No run number available for ingredient switching');
       return;
     }
     
     // Prevent auto-switching if manual selection is active
     if (this.manualIngredientSelection()) {
-      console.log(`🚫 Auto-switch blocked - manual selection is active`);
+      this.debug.warn('BulkPicking', `Auto-switch blocked - manual selection is active`);
       return;
     }
     
     // Get next unpicked ingredient from run
-    console.log(`🔄 AUTO_SWITCH: Calling searchRunItems for run ${runNumber} to find ingredients after completing ${currentIngredient}`);
+    this.debug.stateChange('BulkPicking', `AUTO_SWITCH: Calling searchRunItems for run ${runNumber} to find ingredients after completing ${currentIngredient}`);
 
     // Add a small delay to ensure database changes are committed before querying
     setTimeout(() => {
       this.bulkRunsService.searchRunItems(runNumber).subscribe({
       next: (ingredients) => {
         // Enhanced debug logging to verify API data
-        console.log(`📡 AUTO_SWITCH_API_DATA: searchRunItems returned ${ingredients.data?.length || 0} ingredients:`,
-          ingredients.data?.map(item => ({
+        this.debug.debug('BulkPicking', `AUTO_SWITCH_API_DATA: searchRunItems returned ${ingredients.data?.length || 0} ingredients`, ingredients.data?.map(item => ({
             item_key: item.item_key,
             line_id: item.line_id,
             picked_bulk_qty: item.picked_bulk_qty,
             to_picked_bulk_qty: item.to_picked_bulk_qty,
             description: item.description
-          }))
-        );
+          })));
 
         // Filter out current ingredient and find next unpicked one
         const availableIngredients = ingredients.data?.filter((item: any) =>
@@ -3665,7 +3665,7 @@ export class BulkPickingComponent implements AfterViewInit {
         
         if (availableIngredients.length > 0) {
           // Enhanced logging for debugging duplicate LineId issues
-          console.log(`🔍 AUTO_SWITCH_DEBUG: Found ${availableIngredients.length} available ingredients:`,
+          this.debug.debug('BulkPicking', `AUTO_SWITCH_DEBUG: Found ${availableIngredients.length} available ingredients:`,
             availableIngredients.map(item => ({
               item_key: item.item_key,
               line_id: item.line_id,
@@ -3682,10 +3682,10 @@ export class BulkPickingComponent implements AfterViewInit {
           });
           
           const nextIngredient = availableIngredients[0];
-          console.log(`🔄 Auto-switching from ${currentIngredient} to ${nextIngredient.item_key} (LineId: ${nextIngredient.line_id})`);
+          this.debug.stateChange('BulkPicking', `Auto-switching from ${currentIngredient} to ${nextIngredient.item_key} (LineId: ${nextIngredient.line_id})`);
           this.performIngredientSwitch(currentIngredient, nextIngredient);
         } else {
-          console.log('✅ All ingredients completed - no more ingredients to switch to');
+          this.debug.info('BulkPicking', 'All ingredients completed - no more ingredients to switch to');
           this.showCompletionMessage();
         }
       },
@@ -3703,7 +3703,7 @@ export class BulkPickingComponent implements AfterViewInit {
     const runNumber = this.productionForm.get('runNumber')?.value;
     
     if (!currentFormData || !currentIngredient || !runNumber) {
-      console.log('Insufficient data for completion check - skipping');
+      this.debug.warn('BulkPicking', 'Insufficient data for completion check - skipping');
       return;
     }
     
@@ -3712,27 +3712,27 @@ export class BulkPickingComponent implements AfterViewInit {
     const remainingToPick = parseFloat(currentFormData.current_ingredient?.calculations?.remaining_to_pick || '0');
     const currentPicked = totalNeeded - remainingToPick;
     
-    console.log(`Completion check: Picked ${currentPicked} of ${totalNeeded} for ${currentIngredient} (remaining: ${remainingToPick})`);
+    this.debug.debug('BulkPicking', `Completion check: Picked ${currentPicked} of ${totalNeeded} for ${currentIngredient} (remaining: ${remainingToPick})`);
     
     // Always check for completion, regardless of manual selection
     const isCompleted = remainingToPick <= 0.001 && totalNeeded > 0; // Use small threshold for float comparison
     
     if (isCompleted) {
-      console.log(`✅ Ingredient ${currentIngredient} completed!`);
+      this.debug.info('BulkPicking', `Ingredient ${currentIngredient} completed!`);
       
       // Clear manual selection flag when ANY ingredient is completed
       if (this.manualIngredientSelection()) {
-        console.log(`Clearing manual selection flag - ingredient ${currentIngredient} is now complete`);
+        this.debug.debug('BulkPicking', `Clearing manual selection flag - ingredient ${currentIngredient} is now complete`);
         this.manualIngredientSelection.set(false);
       }
       
       // Auto-switch to next ingredient if not manually selected
       if (!this.manualIngredientSelection()) {
-        console.log(`Auto-switching from completed ingredient ${currentIngredient}...`);
+        this.debug.stateChange('BulkPicking', `Auto-switching from completed ingredient ${currentIngredient}...`);
         this.autoSwitchToNextIngredient(currentIngredient);
       }
     } else {
-      console.log(`Ingredient ${currentIngredient} still needs ${remainingToPick.toFixed(4)} more bags`);
+      this.debug.debug('BulkPicking', `Ingredient ${currentIngredient} still needs ${remainingToPick.toFixed(4)} more bags`);
       
       // Optional: Clear manual selection flag after a timeout if ingredient is not progressing
       this.scheduleManualSelectionTimeout();
@@ -3745,7 +3745,7 @@ export class BulkPickingComponent implements AfterViewInit {
     const pallets = this.palletData();
 
     if (!currentFormData?.current_ingredient?.ingredient || !pallets || pallets.length === 0) {
-      console.log('🚫 Insufficient data for pallet completion check - skipping');
+      this.debug.warn('BulkPicking', 'Insufficient data for pallet completion check - skipping');
       return;
     }
 
@@ -3766,21 +3766,21 @@ export class BulkPickingComponent implements AfterViewInit {
 
     for (const pallet of sortedPallets) {
       const remainingBags = parseFloat(pallet.no_of_bags_remaining?.toString() || '0');
-      console.log(`🎯 Checking pallet completion for ItemKey: ${currentItemKey}, RowNum: ${pallet.row_num}, LineId: ${currentLineId} - Pallet: ${pallet.batch_number} (${remainingBags} bags remaining)`);
+      this.debug.debug('BulkPicking', `Checking pallet completion for ItemKey: ${currentItemKey}, RowNum: ${pallet.row_num}, LineId: ${currentLineId} - Pallet: ${pallet.batch_number} (${remainingBags} bags remaining)`);
 
       if (remainingBags <= 0.001) {
-        console.log(`✅ Pallet ${pallet.batch_number} completed!`);
+        this.debug.info('BulkPicking', `Pallet ${pallet.batch_number} completed!`);
         completedPallets.push(pallet);
       } else if (!activePallet) {
         // First pallet with remaining inventory becomes the active pallet
         activePallet = pallet;
-        console.log(`📦 Active pallet: ${pallet.batch_number} still has ${remainingBags} bags remaining`);
+        this.debug.debug('BulkPicking', `Active pallet: ${pallet.batch_number} still has ${remainingBags} bags remaining`);
       }
     }
 
     // Log completed pallets for debugging
     if (completedPallets.length > 0) {
-      console.log(`✅ Completed pallets: ${completedPallets.map(p => p.batch_number).join(', ')}`);
+      this.debug.info('BulkPicking', `Completed pallets: ${completedPallets.map(p => p.batch_number).join(', ')}`);
     }
 
     // Check if we have an active pallet to advance to
@@ -3788,17 +3788,17 @@ export class BulkPickingComponent implements AfterViewInit {
       // If current form is not pointing to the active pallet, advance to it
       const currentFormRowNum = currentFormData.current_ingredient.ingredient.row_num;
       if (currentFormRowNum !== activePallet.row_num) {
-        console.log(`🔄 Advancing from completed pallets to next active pallet ${activePallet.batch_number} (RowNum: ${activePallet.row_num})`);
+        this.debug.stateChange('BulkPicking', `Advancing from completed pallets to next active pallet ${activePallet.batch_number} (RowNum: ${activePallet.row_num})`);
         this.advanceToNextPallet(currentItemKey, activePallet.row_num, currentLineId);
       } else {
-        console.log(`📦 Current pallet ${activePallet.batch_number} is already active with ${parseFloat(activePallet.no_of_bags_remaining?.toString() || '0')} bags remaining`);
+        this.debug.debug('BulkPicking', `Current pallet ${activePallet.batch_number} is already active with ${parseFloat(activePallet.no_of_bags_remaining?.toString() || '0')} bags remaining`);
       }
     } else {
       // All pallets are completed for this ingredient
-      console.log(`🎉 All pallets completed for ingredient ${currentItemKey}!`);
+      this.debug.info('BulkPicking', `All pallets completed for ingredient ${currentItemKey}!`);
 
       // Trigger universal completion check when all pallets of an ingredient are done
-      console.log('🔍 All pallets done for ingredient - checking if entire run should change to PRINT status...');
+      this.debug.debug('BulkPicking', 'All pallets done for ingredient - checking if entire run should change to PRINT status...');
       const currentResults = this.searchResults();
       if (currentResults && currentResults.length > 0 && currentResults[0].run.run_no) {
         this.runStatusManager.triggerCompletionCheck(currentResults[0].run.run_no, StatusTrigger.PALLET_COMPLETED);
@@ -3818,7 +3818,7 @@ export class BulkPickingComponent implements AfterViewInit {
     const matchingPallet = pallets.find((p: PalletBatch) => p.batch_number === batchNumber);
     
     if (matchingPallet && matchingPallet.row_num) {
-      console.log(`🎯 Found RowNum ${matchingPallet.row_num} for batch ${batchNumber}`);
+      this.debug.debug('BulkPicking', `Found RowNum ${matchingPallet.row_num} for batch ${batchNumber}`);
       return matchingPallet.row_num;
     }
     
@@ -3828,7 +3828,7 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Advance to the next pallet by updating current ingredient coordinates
   private advanceToNextPallet(itemKey: string, nextRowNum: number, lineId: number): void {
-    console.log(`🔄 Advancing to next pallet: ItemKey=${itemKey}, NextRowNum=${nextRowNum}, LineId=${lineId}`);
+    this.debug.stateChange('BulkPicking', `Advancing to next pallet: ItemKey=${itemKey}, NextRowNum=${nextRowNum}, LineId=${lineId}`);
     
     const runNumber = this.productionForm.get('runNumber')?.value;
     
@@ -3841,12 +3841,12 @@ export class BulkPickingComponent implements AfterViewInit {
     this.bulkRunsService.loadIngredientByItemKeyAndCoordinates(runNumber, itemKey, nextRowNum, lineId).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          console.log('✅ Successfully loaded next pallet data:', response.data);
+          this.debug.info('BulkPicking', 'Successfully loaded next pallet data', response.data);
           
           // CRITICAL FIX: Update currentFormData signal with new pallet coordinates
           // This ensures confirmPickOperation() gets the correct row_num/line_id
           this.currentFormData.set(response.data);
-          console.log(`🔄 STATE UPDATE: currentFormData updated with new coordinates - RowNum: ${response.data.current_ingredient?.ingredient.row_num}, LineId: ${response.data.current_ingredient?.ingredient.line_id}`);
+          this.debug.stateChange('BulkPicking', `STATE UPDATE: currentFormData updated with new coordinates - RowNum: ${response.data.current_ingredient?.ingredient.row_num}, LineId: ${response.data.current_ingredient?.ingredient.line_id}`);
           
           // Update form with the new pallet data
           this.populateForm(response.data);
@@ -3855,7 +3855,7 @@ export class BulkPickingComponent implements AfterViewInit {
           const oldPallet = this.palletData()?.find(p => this.extractRowNumFromBatch(p.batch_number) !== nextRowNum)?.batch_number;
           const newPallet = this.palletData()?.find(p => this.extractRowNumFromBatch(p.batch_number) === nextRowNum)?.batch_number;
           
-          console.log(`🎯 Advanced from pallet ${oldPallet} to pallet ${newPallet} for ingredient ${itemKey}`);
+          this.debug.debug('BulkPicking', `Advanced from pallet ${oldPallet} to pallet ${newPallet} for ingredient ${itemKey}`);
         } else {
           console.error('❌ Failed to load next pallet data:', response);
           // Check if this means ingredient is completed
@@ -3872,7 +3872,7 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Handle pallet advancement failure by checking ingredient completion using actual picked quantities
   private handlePalletAdvanceFailure(itemKey: string, failedRowNum: number, lineId: number, errorMessage: string): void {
-    console.log(`🔍 Handling pallet advance failure: ${itemKey}, attempted RowNum: ${failedRowNum}`);
+    this.debug.debug('BulkPicking', `Handling pallet advance failure: ${itemKey}, attempted RowNum: ${failedRowNum}`);
 
     const runNumber = this.productionForm.get('runNumber')?.value;
     if (!runNumber) {
@@ -3889,27 +3889,27 @@ export class BulkPickingComponent implements AfterViewInit {
           // If the run completion check shows this ingredient as complete, move to next ingredient
           // Otherwise, try to load another pallet for the same ingredient
 
-          console.log(`🔍 INGREDIENT_COMPLETION_CHECK: Run ${runNumber} completion status for ${itemKey}`);
+          this.debug.debug('BulkPicking', `INGREDIENT_COMPLETION_CHECK: Run ${runNumber} completion status for ${itemKey}`);
 
           // First, try to load any available pallet for this ingredient
           this.bulkRunsService.loadIngredientByItemKey(runNumber, itemKey).subscribe({
             next: (ingredientResponse) => {
               if (ingredientResponse.success && ingredientResponse.data) {
                 // Ingredient still has available pallets - use it
-                console.log('✅ Ingredient still has pallets available, using first available pallet');
+                this.debug.info('BulkPicking', 'Ingredient still has pallets available, using first available pallet');
                 this.populateForm(ingredientResponse.data);
               } else {
                 // No pallets available, but need to verify if ingredient is actually complete
                 // based on picked quantities (not just pallet availability)
-                console.log(`⚠️ No pallets available for ${itemKey} - checking if ingredient is quantity-complete`);
+                this.debug.warn('BulkPicking', `No pallets available for ${itemKey} - checking if ingredient is quantity-complete`);
 
                 // Check if run completion indicates this ingredient should be complete
                 if (response.data.is_complete || this.isIngredientQuantityComplete(itemKey)) {
-                  console.log(`🎉 Ingredient ${itemKey} is quantity-complete! Moving to next ingredient.`);
+                  this.debug.info('BulkPicking', `Ingredient ${itemKey} is quantity-complete! Moving to next ingredient.`);
                   this.showIngredientCompletedMessage(itemKey);
                   this.loadNextAvailableIngredient(runNumber);
                 } else {
-                  console.log(`⚠️ Ingredient ${itemKey} is not quantity-complete but has no pallets - possible data issue`);
+                  this.debug.warn('BulkPicking', `Ingredient ${itemKey} is not quantity-complete but has no pallets - possible data issue`);
                   this.showIngredientCompletedMessage(itemKey, `No more pallets available for ${itemKey}. Please check if ingredient is complete.`);
                   this.loadNextAvailableIngredient(runNumber);
                 }
@@ -3928,10 +3928,10 @@ export class BulkPickingComponent implements AfterViewInit {
         this.bulkRunsService.loadIngredientByItemKey(runNumber, itemKey).subscribe({
           next: (response) => {
             if (response.success && response.data) {
-              console.log('✅ Fallback: Ingredient still has pallets available');
+              this.debug.info('BulkPicking', 'Fallback: Ingredient still has pallets available');
               this.populateForm(response.data);
             } else {
-              console.log(`🎉 Fallback: Ingredient ${itemKey} appears completed`);
+              this.debug.info('BulkPicking', `Fallback: Ingredient ${itemKey} appears completed`);
               this.showIngredientCompletedMessage(itemKey);
               this.loadNextAvailableIngredient(runNumber);
             }
@@ -3961,7 +3961,7 @@ export class BulkPickingComponent implements AfterViewInit {
   // Show ingredient completion message to user
   private showIngredientCompletedMessage(itemKey: string, customMessage?: string): void {
     const message = customMessage || `Ingredient ${itemKey} has been fully picked! Great job! 🎉`;
-    console.log(`🎉 ${message}`);
+    this.debug.info('BulkPicking', message);
     // You could show a toast notification here if desired
     // this.toastr.success(message, 'Ingredient Completed');
   }
@@ -3971,18 +3971,18 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Load the next available ingredient for picking
   private loadNextAvailableIngredient(runNumber: number): void {
-    console.log('🔄 Looking for next available ingredient...');
+    this.debug.stateChange('BulkPicking', 'Looking for next available ingredient...');
     
     // Get current ingredients list and find next unpicked one
     const currentIngredients = this.searchResults()[0]?.ingredients || [];
     const nextIngredient = currentIngredients.find((ingredient: any) => this.isIngredientUnpicked(ingredient));
     
     if (nextIngredient) {
-      console.log(`🎯 Found next ingredient: ${nextIngredient.item_key}`);
+      this.debug.debug('BulkPicking', `Found next ingredient: ${nextIngredient.item_key}`);
       this.bulkRunsService.loadIngredientByItemKey(runNumber, nextIngredient.item_key).subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            console.log('✅ Loaded next ingredient data');
+            this.debug.info('BulkPicking', 'Loaded next ingredient data');
             this.populateForm(response.data);
           } else {
             console.error('❌ Failed to load next ingredient:', response);
@@ -3993,10 +3993,10 @@ export class BulkPickingComponent implements AfterViewInit {
         }
       });
     } else {
-      console.log('🎉 All ingredients completed! Run is finished!');
+      this.debug.info('BulkPicking', 'All ingredients completed! Run is finished!');
 
       // **CRITICAL FIX**: Trigger universal completion check to update status NEW → PRINT
-      console.log('🔍 All ingredients done - checking if run should change to PRINT status...');
+      this.debug.debug('BulkPicking', 'All ingredients done - checking if run should change to PRINT status...');
       this.runStatusManager.triggerCompletionCheck(runNumber, StatusTrigger.RUN_COMPLETED);
     }
   }
@@ -4008,7 +4008,7 @@ export class BulkPickingComponent implements AfterViewInit {
     const isUnpicked = totalQty > 0 && pickedQty < totalQty;
 
     // Enhanced debug logging for pallet allocation investigation
-    console.log(`🔍 INGREDIENT_FILTER_DEBUG: ${ingredient.item_key}:`, {
+    this.debug.debug('BulkPicking', `INGREDIENT_FILTER_DEBUG: ${ingredient.item_key}`, {
       picked_bulk_qty: pickedQty,
       to_picked_bulk_qty: totalQty,
       isUnpicked: isUnpicked,
@@ -4034,7 +4034,7 @@ export class BulkPickingComponent implements AfterViewInit {
     // Set timeout for 10 minutes - increased from 5 to give more time for manual operations
     this.manualSelectionTimeoutId = window.setTimeout(() => {
       if (this.manualIngredientSelection()) {
-        console.log('⏰ Manual selection timeout after 10 minutes - re-enabling auto-switching');
+        this.debug.debug('BulkPicking', 'Manual selection timeout after 10 minutes - re-enabling auto-switching');
         this.manualIngredientSelection.set(false);
       }
     }, 10 * 60 * 1000); // 10 minutes
@@ -4045,14 +4045,14 @@ export class BulkPickingComponent implements AfterViewInit {
     if (this.manualSelectionTimeoutId) {
       clearTimeout(this.manualSelectionTimeoutId);
       this.manualSelectionTimeoutId = undefined;
-      console.log('⏰ Cleared manual selection timeout - user is actively working');
+      this.debug.debug('BulkPicking', 'Cleared manual selection timeout - user is actively working');
     }
   }
 
   // Handle graceful ingredient switching after all lots are unpicked
   private handlePostUnpickIngredientSwitch(runNo: number, itemKey: string, retryCount = 0): void {
     const maxRetries = 2;
-    console.log(`🔄 RECOVERY MODE: Attempting to recover from post-unpick ingredient switch (attempt ${retryCount + 1}/${maxRetries + 1})`);
+    this.debug.stateChange('BulkPicking', `RECOVERY MODE: Attempting to recover from post-unpick ingredient switch (attempt ${retryCount + 1}/${maxRetries + 1})`);
     
     // Clear any existing error state
     this.errorMessage.set(null);
@@ -4061,7 +4061,7 @@ export class BulkPickingComponent implements AfterViewInit {
     this.bulkRunsService.getBulkRunFormData(runNo).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          console.log('✅ RECOVERY: Successfully loaded fresh run data');
+          this.debug.info('BulkPicking', 'RECOVERY: Successfully loaded fresh run data');
           this.currentFormData.set(response.data);
           this.populateForm(response.data);
           
@@ -4085,7 +4085,7 @@ export class BulkPickingComponent implements AfterViewInit {
         // Retry with exponential backoff up to maxRetries
         if (retryCount < maxRetries) {
           const retryDelay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s delays
-          console.log(`🔄 Retrying recovery in ${retryDelay}ms...`);
+          this.debug.stateChange('BulkPicking', `Retrying recovery in ${retryDelay}ms...`);
           this.errorMessage.set(`Recovery attempt ${retryCount + 1} failed. Retrying in ${retryDelay / 1000}s...`);
           
           setTimeout(() => {
@@ -4101,7 +4101,7 @@ export class BulkPickingComponent implements AfterViewInit {
   
   // Show completion message when all ingredients are done
   private showCompletionMessage(): void {
-    console.log('🎉 All ingredients completed for this bulk run!');
+    this.debug.info('BulkPicking', 'All ingredients completed for this bulk run!');
     
     // Show completion notification
     alert('✅ Run Completed! All ingredients have been successfully picked for this bulk run.');
@@ -4111,7 +4111,7 @@ export class BulkPickingComponent implements AfterViewInit {
   private performIngredientSwitch(fromIngredient: string, toIngredient: any): void {
     // Double-check: Skip if manual ingredient selection is active
     if (this.manualIngredientSelection()) {
-      console.log(`🚫 Blocking auto-switch to ${toIngredient.item_key} - manual selection active`);
+      this.debug.warn('BulkPicking', `Blocking auto-switch to ${toIngredient.item_key} - manual selection active`);
       return;
     }
     
@@ -4141,7 +4141,7 @@ export class BulkPickingComponent implements AfterViewInit {
       this.switchNotification.set({ show: false, message: '' });
     }, 3000);
     
-    console.log(message);
+    this.debug.debug('BulkPicking', message);
   }
   
   // Public accessors for template
@@ -4253,7 +4253,7 @@ export class BulkPickingComponent implements AfterViewInit {
         this.isLoadingPickedLots.set(false);
         if (response.success && response.data) {
           this.batchWeightSummary.set(response.data);
-          console.log('📊 Batch weight summary loaded:', response.data);
+          this.debug.debug('BulkPicking', 'Batch weight summary loaded', response.data);
         } else {
           console.error('Failed to load batch weight summary:', response.message);
           this.pickedLotsError.set(response.message || 'Failed to load weight summary');
@@ -4362,14 +4362,14 @@ export class BulkPickingComponent implements AfterViewInit {
 
                 // 3. CRITICAL: Clear pallet data cache to prevent stale data
                 this.palletData.set([]);
-                console.log(`🔄 CACHE INVALIDATION: Cleared stale pallet data after unpick`);
+                this.debug.stateChange('BulkPicking', 'CACHE INVALIDATION: Cleared stale pallet data after unpick');
 
                 // 4. ATOMIC STATE UPDATE: Wait for pallet data to refresh before completion checks
                 const currentItemKey = this.productionForm.get('itemKey')?.value;
                 if (currentItemKey) {
                   this.loadPalletTrackingDataObservable(runNo, currentItemKey).subscribe({
                     next: () => {
-                      console.log(`🔄 ATOMIC_STATE: Pallet data refreshed, now running completion checks`);
+                      this.debug.stateChange('BulkPicking', 'ATOMIC_STATE: Pallet data refreshed, now running completion checks');
 
                       // 5. CRITICAL: Refresh batch weight summary for consistent pallet table
                       this.loadBatchWeightSummary();
@@ -4383,7 +4383,7 @@ export class BulkPickingComponent implements AfterViewInit {
                       // 8. Force Angular change detection for immediate UI update
                       this.cdr.detectChanges();
 
-                      console.log(`✅ ATOMIC_STATE: Complete state refresh finished after unpick ${actionDescription}`);
+                      this.debug.info('BulkPicking', `ATOMIC_STATE: Complete state refresh finished after unpick ${actionDescription}`);
                     },
                     error: (error: any) => {
                       console.warn('Failed to load pallet data after unpick, running completion checks anyway:', error);
@@ -4402,7 +4402,7 @@ export class BulkPickingComponent implements AfterViewInit {
                   this.cdr.detectChanges();
                 }
 
-                console.log(`✅ Modal unpick completed and state refresh initiated for ${actionDescription}`);
+                this.debug.info('BulkPicking', `Modal unpick completed and state refresh initiated for ${actionDescription}`);
               }
             },
             error: (formError) => {
@@ -4463,8 +4463,8 @@ export class BulkPickingComponent implements AfterViewInit {
 
       // ENHANCED DEBUGGING: Log complete pallet objects to identify structure issues
       const now = new Date().toLocaleTimeString();
-      console.log(`🔍 FULL PALLET DEBUG for ingredient ${itemKey} at ${now}:`, palletData);
-      console.log(`🔍 PALLET OBJECT KEYS:`, palletData.length > 0 ? Object.keys(palletData[0]) : 'No pallets');
+      this.debug.debug('BulkPicking', `FULL PALLET DEBUG for ingredient ${itemKey} at ${now}`, palletData);
+      this.debug.debug('BulkPicking', 'PALLET OBJECT KEYS', palletData.length > 0 ? Object.keys(palletData[0]) : 'No pallets');
 
       // CRITICAL: Force fresh data load if pallet data shows all zeros (indicates stale cache)
       const allZeros = palletData.every(p => (p.no_of_bags_remaining || 0) === 0);
@@ -4475,7 +4475,7 @@ export class BulkPickingComponent implements AfterViewInit {
         const now = Date.now();
 
         if (now - lastDetectionTime < this.STALE_DATA_COOLDOWN_MS) {
-          console.log(`🕒 COOLDOWN: Stale data detection for ${itemKey} is in cooldown (${this.STALE_DATA_COOLDOWN_MS}ms), skipping refresh`);
+          this.debug.debug('BulkPicking', `COOLDOWN: Stale data detection for ${itemKey} is in cooldown (${this.STALE_DATA_COOLDOWN_MS}ms), skipping refresh`);
           return 0; // Still return 0 but don't trigger refresh
         }
 
@@ -4486,7 +4486,7 @@ export class BulkPickingComponent implements AfterViewInit {
           this.loadPalletTrackingData(runNo, itemKey);
         }
         // IMPORTANT: Return 0 to show "loading" state, don't use stale form data
-        console.log(`⚠️ Using 0 (loading state) due to stale data for ingredient ${itemKey} - waiting for fresh data`);
+        this.debug.warn('BulkPicking', `Using 0 (loading state) due to stale data for ingredient ${itemKey} - waiting for fresh data`);
         return 0;
       }
 
@@ -4514,8 +4514,8 @@ export class BulkPickingComponent implements AfterViewInit {
 
       const currentBatchRemaining = currentPallet ? parseFloat(currentPallet.no_of_bags_remaining?.toString() || '0') : 0;
 
-      console.log(`🔄 Using CURRENT BATCH calculation for ingredient ${itemKey}: ${currentBatchRemaining} bags from pallet ${currentPallet?.batch_number || 'unknown'} (RowNum: ${currentPallet?.row_num || 'unknown'})`);
-      console.log(`📊 Current pallet details:`, currentPallet ? {
+      this.debug.stateChange('BulkPicking', `Using CURRENT BATCH calculation for ingredient ${itemKey}: ${currentBatchRemaining} bags from pallet ${currentPallet?.batch_number || 'unknown'} (RowNum: ${currentPallet?.row_num || 'unknown'})`);
+      this.debug.debug('BulkPicking', 'Current pallet details', currentPallet ? {
         batch_number: currentPallet.batch_number,
         row_num: currentPallet.row_num,
         remaining: currentPallet.no_of_bags_remaining,
@@ -4530,12 +4530,12 @@ export class BulkPickingComponent implements AfterViewInit {
       const isAlreadyLoading = this.palletLoadingStates.get(loadKey);
 
       if (!isAlreadyLoading) {
-        console.log(`⚠️ Pallet data mismatch: have ${currentIngredientInPalletData}, need ${itemKey}. Refreshing...`);
+        this.debug.warn('BulkPicking', `Pallet data mismatch: have ${currentIngredientInPalletData}, need ${itemKey}. Refreshing...`);
         if (runNo) {
           this.loadPalletTrackingData(runNo, itemKey);
         }
       } else {
-        console.log(`⏳ MISMATCH WAIT: Pallet data for ${itemKey} is already loading, skipping refresh`);
+        this.debug.debug('BulkPicking', `MISMATCH WAIT: Pallet data for ${itemKey} is already loading, skipping refresh`);
       }
     }
 
@@ -4546,19 +4546,19 @@ export class BulkPickingComponent implements AfterViewInit {
       const isAlreadyLoading = this.palletLoadingStates.get(loadKey);
 
       if (!isAlreadyLoading) {
-        console.log(`🔄 No pallet data available for ${itemKey} - triggering load and showing loading state`);
+        this.debug.stateChange('BulkPicking', `No pallet data available for ${itemKey} - triggering load and showing loading state`);
         if (runNo) {
           this.loadPalletTrackingData(runNo, itemKey);
         }
       } else {
-        console.log(`⏳ WAIT STATE: Pallet data for ${itemKey} is already loading, returning loading state`);
+        this.debug.debug('BulkPicking', `WAIT STATE: Pallet data for ${itemKey} is already loading, returning loading state`);
       }
       return 0; // Show loading state, not stale form data
     }
 
     // If we get here, use form data as last resort (should rarely happen)
     const fallbackNumber = typeof fallbackValue === 'string' ? parseFloat(fallbackValue) : fallbackValue;
-    console.log(`⚠️ Using fallback calculation for ingredient ${itemKey}:`, fallbackNumber);
+    this.debug.warn('BulkPicking', `Using fallback calculation for ingredient ${itemKey}:`, fallbackNumber);
     return fallbackNumber || 0;
   }
 
@@ -4632,7 +4632,7 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
     
-    console.log(`🔄 SWITCHING: Switching to ingredient ${itemKey}, manual selection active: ${this.manualIngredientSelection()}`);
+    this.debug.stateChange('BulkPicking', `SWITCHING: Switching to ingredient ${itemKey}, manual selection active: ${this.manualIngredientSelection()}`);
     
     this.switchInProgress.set(true);
     
@@ -4664,7 +4664,7 @@ export class BulkPickingComponent implements AfterViewInit {
           this.consecutiveCompletedCount.set(0);
           this.switchInProgress.set(false);
           
-          console.log('Auto-switched to ingredient:', itemKey);
+          this.debug.stateChange('BulkPicking', `Auto-switched to ingredient: ${itemKey}`);
         }
       },
       error: (error) => {
@@ -4974,7 +4974,7 @@ export class BulkPickingComponent implements AfterViewInit {
     this.isProcessing.set(true);
     this.errorMessage.set(null);
 
-    console.log('Completing assembly...', {
+    this.debug.debug('BulkPicking', 'Completing assembly...', {
       runNo: formData.run.run_no,
       form: this.productionForm.value,
       palletData: this.palletData()
@@ -4992,7 +4992,7 @@ export class BulkPickingComponent implements AfterViewInit {
    * Reset component state when switching between runs to prevent state leakage
    */
   private resetComponentState(): void {
-    console.log('🔄 RESET STATE: Clearing component state for new run');
+    this.debug.stateChange('BulkPicking', 'RESET STATE: Clearing component state for new run');
     
     // Clear manual ingredient selection flag that was blocking new run loads
     this.manualIngredientSelection.set(false);
@@ -5032,12 +5032,12 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
 
-    console.log('🖨️ Starting print process for run:', formData.run.run_no);
+    this.debug.debug('BulkPicking', `Starting print process for run: ${formData.run.run_no}`);
     
     // Check if we have run-level picked data cached
     const runLevelPickedData = this.pickedLotsData();
     if (runLevelPickedData && runLevelPickedData.picked_lots && runLevelPickedData.picked_lots.length > 0) {
-      console.log('✅ Using cached run-level picked data for printing:', runLevelPickedData.picked_lots.length, 'lots');
+      this.debug.info('BulkPicking', `Using cached run-level picked data for printing: ${runLevelPickedData.picked_lots.length} lots`);
       
       // Use the run-level picked data directly for printing
       const pickedItems = this.transformPickedLotsToPickedItems(runLevelPickedData.picked_lots);
@@ -5051,7 +5051,7 @@ export class BulkPickingComponent implements AfterViewInit {
     // Fallback: Fetch ALL ingredients and picked data for the entire run
     this.fetchCompleteRunDataForPrint(formData.run.run_no)
       .then(completeRunData => {
-        console.log('✅ Complete run data fetched:', completeRunData);
+        this.debug.info('BulkPicking', 'Complete run data fetched', completeRunData);
         
         // Transform complete data into print format
         const pickedItems = this.transformCompleteRunDataToPickedItems(completeRunData);
@@ -5064,7 +5064,7 @@ export class BulkPickingComponent implements AfterViewInit {
           suggested_bin: this.productionForm?.get('suggestedBinNumber')?.value || ''
         };
         
-        console.log('🔍 PRINT DEBUG - Complete Run Data:', {
+        this.debug.debug('BulkPicking', 'PRINT DEBUG - Complete Run Data', {
           runData: enhancedRunData,
           allIngredients: completeRunData.allIngredients?.length || 0,
           pickedLotsCount: completeRunData.pickedLots?.length || 0,
@@ -5120,7 +5120,7 @@ export class BulkPickingComponent implements AfterViewInit {
       next: (response) => {
         if (response.success && response.data) {
           this.pickedLotsData.set(response.data);
-          console.log(`🖨️ PRINT STATUS: Refreshed run-level picked data - ${response.data.picked_lots.length} picked lots found`);
+          this.debug.debug('BulkPicking', `PRINT STATUS: Refreshed run-level picked data - ${response.data.picked_lots.length} picked lots found`);
         } else {
           this.pickedLotsData.set(null);
         }
@@ -5146,7 +5146,7 @@ export class BulkPickingComponent implements AfterViewInit {
           this.currentRunStatus.set(response.data);
           // Also update the status manager's state
           this.runStatusManager.setCurrentStatus(runNo, response.data.status);
-          console.log(`🏁 STATUS FLAG: Run ${runNo} status: ${response.data.status}`);
+          this.debug.debug('BulkPicking', `STATUS FLAG: Run ${runNo} status: ${response.data.status}`);
         } else {
           this.currentRunStatus.set(null);
           console.warn(`⚠️ STATUS FLAG: No status data for run ${runNo}`);
@@ -5229,14 +5229,14 @@ export class BulkPickingComponent implements AfterViewInit {
    */
   private executeStatusRevert(runNo: number): void {
     this.isRevertingStatus.set(true);
-    console.log(`🔄 COMPONENT: Starting status revert for run ${runNo}`);
+    this.debug.stateChange('BulkPicking', `COMPONENT: Starting status revert for run ${runNo}`);
 
     this.bulkRunsService.revertRunStatus(runNo).subscribe({
       next: (response) => {
         this.isRevertingStatus.set(false);
 
         if (response.success) {
-          console.log(`✅ COMPONENT: Successfully reverted run ${runNo} status to NEW`);
+          this.debug.info('BulkPicking', `COMPONENT: Successfully reverted run ${runNo} status to NEW`);
 
           // Update the current run status with the response data
           if (response.data) {
@@ -5333,7 +5333,7 @@ export class BulkPickingComponent implements AfterViewInit {
       const pickedLotsResponse = await this.bulkRunsService.getAllPickedLotsForRun(runNo).toPromise();
       const pickedLots = pickedLotsResponse?.data?.picked_lots || [];
       
-      console.log('📊 Fetched run data:', {
+      this.debug.debug('BulkPicking', 'Fetched run data', {
         runNo: runNo,
         allIngredients: allIngredients.length,
         pickedLots: pickedLots.length,
@@ -5378,7 +5378,7 @@ export class BulkPickingComponent implements AfterViewInit {
       itemMap.get(itemKey)!.push(pickedLot);
     }
     
-    console.log('🔍 Batch-Item mapping:', {
+    this.debug.debug('BulkPicking', 'Batch-Item mapping', {
       totalBatches: batchItemMap.size,
       batchKeys: Array.from(batchItemMap.keys()),
       batchItemCounts: Array.from(batchItemMap.entries()).map(([batch, items]) => ({
@@ -5428,7 +5428,7 @@ export class BulkPickingComponent implements AfterViewInit {
         
         pickedItems.push(pickedItem);
         
-        console.log('✅ Created picked item:', {
+        this.debug.info('BulkPicking', 'Created picked item', {
           batchNo: batchNo,
           itemKey: itemKey,
           description: ingredient.description,
@@ -5440,7 +5440,7 @@ export class BulkPickingComponent implements AfterViewInit {
       }
     }
     
-    console.log(`📦 Generated ${pickedItems.length} picked items from complete run data`);
+    this.debug.debug('BulkPicking', `Generated ${pickedItems.length} picked items from complete run data`);
     return pickedItems;
   }
 

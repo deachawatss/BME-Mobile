@@ -4,19 +4,21 @@
 import { Component, signal, computed, effect, inject, OnInit, OnDestroy } from '@angular/core';
 import { Subject, takeUntil, switchMap, combineLatest } from 'rxjs';
 
-import { 
-  IngredientIntelligenceService, 
+import {
+  IngredientIntelligenceService,
   IngredientBatchStatus,
   RunCoordinationState,
   BatchCompletionRequest,
-  AutoSwitchResponse 
+  AutoSwitchResponse
 } from '../../services/ingredient-intelligence.service';
 
-import { 
+import {
   WorkflowStateMachineService,
   WorkflowState,
-  WorkflowEvent 
+  WorkflowEvent
 } from '../../services/workflow-state-machine.service';
+
+import { DebugService } from '../../services/debug.service';
 
 @Component({
   selector: 'app-bulk-picking-intelligence',
@@ -26,6 +28,7 @@ import {
 export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
   private readonly intelligenceService = inject(IngredientIntelligenceService);
   private readonly workflowService = inject(WorkflowStateMachineService);
+  private readonly debug = inject(DebugService);
   private readonly destroy$ = new Subject<void>();
 
   // Intelligence system signals
@@ -77,7 +80,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
    */
   private initializeIntelligentWorkflow(): void {
     const runNo = this.currentRunNo();
-    console.log(`🧠 Initializing intelligent workflow for run ${runNo}`);
+    this.debug.stateChange('IntelligenceIntegration', `Initializing intelligent workflow for run ${runNo}`);
 
     // Initialize workflow state machine
     this.workflowService.initializeWorkflow(runNo);
@@ -88,10 +91,10 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .subscribe({
         next: (statuses) => {
           this.ingredientStatuses.set(statuses);
-          console.log(`📊 Loaded ${statuses.length} ingredient statuses`);
+          this.debug.debug('IntelligenceIntegration', `Loaded ${statuses.length} ingredient statuses`);
         },
         error: (error) => {
-          console.error('❌ Failed to load ingredient statuses:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to load ingredient statuses', error);
         }
       });
 
@@ -101,10 +104,10 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .subscribe({
         next: (coordination) => {
           this.coordinationState.set(coordination);
-          console.log(`🎯 Run coordination initialized for ${coordination.total_ingredients} ingredients`);
+          this.debug.stateChange('IntelligenceIntegration', `Run coordination initialized for ${coordination.total_ingredients} ingredients`);
         },
         error: (error) => {
-          console.error('❌ Failed to initialize run coordination:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to initialize run coordination', error);
         }
       });
   }
@@ -118,7 +121,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe(state => {
         this.currentWorkflowState.set(state);
-        console.log(`🔄 Workflow state changed to: ${state}`);
+        this.debug.stateChange('IntelligenceIntegration', `Workflow state changed to: ${state}`);
       });
 
     // React to coordination state changes for auto-switching
@@ -142,7 +145,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
     pickedQuantity: number,
     userId: string
   ): Promise<void> {
-    console.log(`✅ Processing batch completion: ${batchNumber}, ${ingredient}, ${pickedQuantity}`);
+    this.debug.info('IntelligenceIntegration', `Processing batch completion: ${batchNumber}, ${ingredient}, ${pickedQuantity}`);
 
     // Create batch completion request
     const completionRequest: BatchCompletionRequest = {
@@ -163,7 +166,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
         await this.handleAutoSwitch(switchResponse);
       } else {
         // Continue with current ingredient
-        console.log(`⏳ Continuing with current ingredient: ${ingredient}`);
+        this.debug.stateChange('IntelligenceIntegration', `Continuing with current ingredient: ${ingredient}`);
         this.workflowService.completeBatch(batchNumber)
           .pipe(takeUntil(this.destroy$))
           .subscribe(success => {
@@ -178,7 +181,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       this.refreshIngredientStatuses();
       
     } catch (error) {
-      console.error('❌ Error processing batch completion:', error);
+      this.debug.error('IntelligenceIntegration', 'Error processing batch completion', error);
       this.workflowService.handleError('Batch completion failed');
     }
   }
@@ -190,12 +193,12 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
     const { switch_decision, coordination_state } = switchResponse;
     
     if (!switch_decision.next_ingredient) {
-      console.log('✅ All ingredients completed!');
+      this.debug.info('IntelligenceIntegration', 'All ingredients completed!');
       this.workflowService.transitionToState('RUN_COMPLETION', 'COMPLETE_RUN');
       return;
     }
 
-    console.log(`🔄 Auto-switching from ${switch_decision.current_ingredient} to ${switch_decision.next_ingredient}`);
+    this.debug.stateChange('IntelligenceIntegration', `Auto-switching from ${switch_decision.current_ingredient} to ${switch_decision.next_ingredient}`);
     
     // Show switching notification
     this.showAutoSwitchNotification(
@@ -223,10 +226,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
     consecutiveCompleted: number
   ): void {
     // This would integrate with your existing notification system
-    console.log(`🔔 Auto-Switch Notification:
-      ✅ Completed ${consecutiveCompleted} consecutive batches for ${currentIngredient}
-      ➡️ Switching to ${nextIngredient}
-      🎯 Continue with new ingredient workflow`);
+    this.debug.info('IntelligenceIntegration', `Auto-Switch Notification: Completed ${consecutiveCompleted} consecutive batches for ${currentIngredient}, switching to ${nextIngredient}. Continue with new ingredient workflow.`);
     
     // Example: Show toast notification
     // this.toastService.show({
@@ -246,13 +246,13 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       // const formData = await this.bulkRunsService.getFormDataForIngredient(this.currentRunNo(), itemKey);
       // this.populateFormWithIngredientData(formData);
       
-      console.log(`📋 Loading form data for new ingredient: ${itemKey}`);
+      this.debug.debug('IntelligenceIntegration', `Loading form data for new ingredient: ${itemKey}`);
       
       // Reset workflow to ingredient selection with new ingredient
       this.workflowService.selectIngredient(itemKey);
       
     } catch (error) {
-      console.error('❌ Failed to load new ingredient data:', error);
+      this.debug.error('IntelligenceIntegration', 'Failed to load new ingredient data', error);
       this.workflowService.handleError('Failed to load new ingredient data');
     }
   }
@@ -265,7 +265,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
     const completed = coordination.consecutive_completed_batches;
     
     if (completed >= threshold - 1) {
-      console.log(`⚠️ Auto-switch approaching: ${completed}/${threshold} batches completed`);
+      this.debug.warn('IntelligenceIntegration', `Auto-switch approaching: ${completed}/${threshold} batches completed`);
       
       // Update UI to show auto-switch is imminent
       // this.showAutoSwitchWarning = true;
@@ -276,7 +276,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
    * Manual ingredient switching (user override)
    */
   async manualSwitchIngredient(newIngredient: string): Promise<void> {
-    console.log(`👤 Manual ingredient switch to: ${newIngredient}`);
+    this.debug.stateChange('IntelligenceIntegration', `Manual ingredient switch to: ${newIngredient}`);
     
     try {
       // Reset coordination consecutive count
@@ -294,7 +294,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       await this.loadIngredientFormData(newIngredient);
       
     } catch (error) {
-      console.error('❌ Manual ingredient switch failed:', error);
+      this.debug.error('IntelligenceIntegration', 'Manual ingredient switch failed', error);
       this.workflowService.handleError('Manual ingredient switch failed');
     }
   }
@@ -310,14 +310,14 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (ingredients) => {
-          console.log(`🔍 Available ingredients for search: ${ingredients.length} (completed ingredients hidden)`);
+          this.debug.debug('IntelligenceIntegration', `Available ingredients for search: ${ingredients.length} (completed ingredients hidden)`);
           
           // Update your existing ingredient search modal data
           // this.itemSearchResults.set(ingredients);
           // this.showItemSearchModal.set(true);
         },
         error: (error) => {
-          console.error('❌ Failed to load available ingredients:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to load available ingredients', error);
         }
       });
   }
@@ -333,10 +333,10 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .subscribe({
         next: (statuses) => {
           this.ingredientStatuses.set(statuses);
-          console.log(`🔄 Refreshed ingredient statuses: ${statuses.length} ingredients`);
+          this.debug.stateChange('IntelligenceIntegration', `Refreshed ingredient statuses: ${statuses.length} ingredients`);
         },
         error: (error) => {
-          console.error('❌ Failed to refresh ingredient statuses:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to refresh ingredient statuses', error);
         }
       });
   }
@@ -346,7 +346,7 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
    */
   private resetFormForNextPick(): void {
     // Reset your form fields while preserving ingredient selection
-    console.log('🔄 Resetting form for next pick operation');
+    this.debug.stateChange('IntelligenceIntegration', 'Resetting form for next pick operation');
     
     // Example form reset logic
     // this.selectedLot.set('');
@@ -365,16 +365,13 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (metrics) => {
-          console.log(`📊 Run completion metrics:
-            - Overall: ${metrics.overall_completion_percentage.toFixed(1)}%
-            - Ingredients: ${metrics.completed_ingredients}/${metrics.total_ingredients}
-            - Batches: ${metrics.completed_batches}/${metrics.total_batches}`);
+          this.debug.debug('IntelligenceIntegration', `Run completion metrics: Overall: ${metrics.overall_completion_percentage.toFixed(1)}%, Ingredients: ${metrics.completed_ingredients}/${metrics.total_ingredients}, Batches: ${metrics.completed_batches}/${metrics.total_batches}`);
           
           // Update dashboard UI
           // this.completionMetrics.set(metrics);
         },
         error: (error) => {
-          console.error('❌ Failed to load completion metrics:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to load completion metrics', error);
         }
       });
   }
@@ -389,16 +386,13 @@ export class BulkPickingIntelligenceIntegration implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (optimization) => {
-          console.log(`🎯 Lot optimization recommendations:
-            - Ingredient assignments: ${Object.keys(optimization.ingredient_lot_assignments).length}
-            - Unique lots: ${Object.keys(optimization.lot_ingredient_usage).length}
-            - Zone preferences: ${Object.entries(optimization.lot_zone_preferences).map(([ing, zone]) => `${ing}→${zone}`).join(', ')}`);
+          this.debug.debug('IntelligenceIntegration', `Lot optimization recommendations: Ingredient assignments: ${Object.keys(optimization.ingredient_lot_assignments).length}, Unique lots: ${Object.keys(optimization.lot_ingredient_usage).length}, Zone preferences: ${Object.entries(optimization.lot_zone_preferences).map(([ing, zone]) => `${ing}→${zone}`).join(', ')}`);
           
           // Apply optimization to ingredient suggestions
           // this.applyLotOptimization(optimization);
         },
         error: (error) => {
-          console.error('❌ Failed to load lot optimization:', error);
+          this.debug.error('IntelligenceIntegration', 'Failed to load lot optimization', error);
         }
       });
   }
