@@ -1422,9 +1422,9 @@ interface ProductionRun {
                   class="tw-px-4 tw-py-2 tw-text-sm tw-font-medium tw-border-b-2 tw-transition-colors tw-cursor-pointer"
                   type="button">
                   Pending to Picked
-                  <span *ngIf="batchWeightSummary()?.batch_items?.length" 
+                  <span *ngIf="filteredBatchItems()?.length"
                         class="tw-ml-2 tw-bg-blue-500 tw-text-white tw-text-xs tw-px-2 tw-py-0.5 tw-rounded-full">
-                    {{batchWeightSummary()?.batch_items?.length}}
+                    {{filteredBatchItems()?.length}}
                   </span>
                 </button>
               </nav>
@@ -1521,14 +1521,14 @@ interface ProductionRun {
                         </tr>
                       </thead>
                       <tbody class="tw-bg-white tw-divide-y tw-divide-gray-200">
-                        <tr *ngFor="let batch of batchWeightSummary()?.batch_items" class="hover:tw-bg-gray-50">
+                        <tr *ngFor="let batch of filteredBatchItems()" class="hover:tw-bg-gray-50">
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{batch.batch_no}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">{{batch.item_key}}</td>
                           <td class="tw-px-3 tw-py-2 tw-whitespace-nowrap tw-text-sm tw-text-gray-900">
                             {{batch.remaining_weight_kg | number:'1.2-2'}}
                           </td>
                         </tr>
-                        <tr *ngIf="!batchWeightSummary()?.batch_items?.length">
+                        <tr *ngIf="!filteredBatchItems()?.length">
                           <td colspan="3" class="tw-px-3 tw-py-8 tw-text-center tw-text-gray-500">
                             No pending batch requirements found
                           </td>
@@ -1681,6 +1681,12 @@ export class BulkPickingComponent implements AfterViewInit {
   showPickedLotsModal = signal(false);
   pickedLotsData = signal<PickedLotsResponse | null>(null);
   batchWeightSummary = signal<BatchWeightSummaryResponse | null>(null);
+  // Filtered batch items excluding zero remaining weight lines
+  filteredBatchItems = computed(() => {
+    const summary = this.batchWeightSummary();
+    if (!summary?.batch_items) return [];
+    return summary.batch_items.filter(item => Number(item.remaining_weight_kg) > 0);
+  });
   isLoadingPickedLots = signal(false);
   pickedLotsError = signal<string | null>(null);
   selectedUnpickLot = signal<string | null>(null);
