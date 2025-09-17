@@ -438,14 +438,14 @@ impl Database {
                 MIN(bp.StandardQty) as StandardQty,
                 MIN(bp.PackSize) as PackSize,
                 MIN(bp.TopickedStdQty) as TopickedStdQty,
-                SUM(bp.ToPickedBulkQty * bp.PackSize) as ToPickedBulkQty,  -- Total weight across all batches
-                SUM(ISNULL(bp.PickedBulkQty, 0) * bp.PackSize) as PickedBulkQty,  -- Total picked weight
+                SUM(bp.ToPickedBulkQty) as ToPickedBulkQty,  -- Total bags needed across all batches
+                SUM(ISNULL(bp.PickedBulkQty, 0)) as PickedBulkQty,  -- Total bags picked across all batches
                 MAX(bp.PickingDate) as PickingDate,
                 MIN(bp.ItemBatchStatus) as ItemBatchStatus,
-                -- Aggregated remaining calculation
-                CASE 
+                -- Aggregated remaining calculation (in bags)
+                CASE
                     WHEN SUM(bp.ToPickedBulkQty) <= 0 THEN 0
-                    ELSE SUM(bp.ToPickedBulkQty * bp.PackSize) - SUM(ISNULL(bp.PickedBulkQty, 0) * bp.PackSize)
+                    ELSE SUM(bp.ToPickedBulkQty) - SUM(ISNULL(bp.PickedBulkQty, 0))
                 END as RemainingQty,
                 -- Aggregated completion status
                 CASE 
@@ -3019,15 +3019,25 @@ impl Database {
         info!("🔍 DEBUG: Checking completion status for run {}", run_no);
         
         // **COMPLETION DETECTION LOGIC**: Check if all ingredients with ToPickedBulkQty > 0 are fully picked
+        // Use allocation-based calculation instead of unreliable PickedBulkQty
         let completion_check_query = r#"
             SELECT COUNT(*) as IncompleteCount
-            FROM cust_BulkPicked 
-            WHERE RunNo = @P1 
-              AND ToPickedBulkQty > 0 
-              AND (PickedBulkQty < ToPickedBulkQty OR PickedBulkQty IS NULL)
+            FROM cust_BulkPicked bp
+            LEFT JOIN (
+                SELECT RunNo, ItemKey,
+                       SUM(ISNULL(QtyReceived, 0) / PackSize) as ActualPickedQty
+                FROM Cust_BulkLotPicked
+                WHERE RunNo = @P1
+                GROUP BY RunNo, ItemKey
+            ) actual_picked ON bp.RunNo = actual_picked.RunNo
+                            AND bp.ItemKey = actual_picked.ItemKey
+            WHERE bp.RunNo = @P1
+              AND bp.ToPickedBulkQty > 0
+              AND (ISNULL(actual_picked.ActualPickedQty, 0) < bp.ToPickedBulkQty)
         "#;
         
         let mut check_stmt = TiberiusQuery::new(completion_check_query);
+        check_stmt.bind(run_no);
         check_stmt.bind(run_no);
         
         let check_result = check_stmt
@@ -3754,11 +3764,23 @@ impl Database {
         if let Some(row) = rows.first() {
             let allocation_count: i32 = row.get("AllocationCount").unwrap_or(0);
             if allocation_count == 0 {
-                return Err(anyhow::anyhow!("No allocations found to unpick"));
+                info!("✅ No allocations found - ingredient already unpicked (success)");
+                return Ok(serde_json::json!({
+                    "message": "No allocations found - ingredient already unpicked",
+                    "status": "success",
+                    "operation_type": "unpick_already_clean",
+                    "allocation_count": 0
+                }));
             }
             info!("✅ Found {} allocation records to unpick", allocation_count);
         } else {
-            return Err(anyhow::anyhow!("No allocations found to unpick"));
+            info!("✅ No allocation records exist - ingredient already unpicked (success)");
+            return Ok(serde_json::json!({
+                "message": "No allocation records exist - ingredient already unpicked",
+                "status": "success",
+                "operation_type": "unpick_already_clean",
+                "allocation_count": 0
+            }));
         }
 
         // Step 1b: Get actual issued quantities from LotTransaction for rollback calculations
@@ -3887,27 +3909,35 @@ impl Database {
 
         // Step 5: Reset picked quantities in cust_BulkPicked (preserve PickingDate)
         let reset_picked_query = if specific_lot.is_some() {
-            // For specific lot, calculate partial reset
-            let remaining_qty = format!(r#"
-                UPDATE bp SET 
-                    PickedBulkQty = CASE 
-                        WHEN bp.PickedBulkQty - {} <= 0 THEN 0 
-                        ELSE bp.PickedBulkQty - {}
+            // For specific lot unpick, use partial reduction with rollback quantity
+            if total_qty_to_rollback > 0.0 {
+                // Use calculated rollback quantity from LotTransaction records
+                format!(r#"
+                    UPDATE cust_BulkPicked
+                    SET PickedBulkQty = CASE
+                        WHEN PickedBulkQty - {} <= 0 THEN 0
+                        ELSE PickedBulkQty - {}
                     END,
-                    PickedQty = CASE 
-                        WHEN bp.PickedBulkQty - {} <= 0 THEN 0 
-                        ELSE (bp.PickedBulkQty - {}) * bp.PackSize
+                    PickedQty = CASE
+                        WHEN PickedBulkQty - {} <= 0 THEN 0
+                        ELSE (PickedBulkQty - {}) * PackSize
                     END
-                FROM cust_BulkPicked bp
-                WHERE bp.RunNo = {} AND bp.RowNum = {} AND bp.LineId = {}
-            "#, total_qty_to_rollback, total_qty_to_rollback, 
-                total_qty_to_rollback, total_qty_to_rollback,
-                run_no, row_num, line_id);
-            remaining_qty
+                    WHERE RunNo = {} AND RowNum = {} AND LineId = {}
+                "#, total_qty_to_rollback, total_qty_to_rollback,
+                    total_qty_to_rollback, total_qty_to_rollback,
+                    run_no, row_num, line_id)
+            } else {
+                // Fallback: Reset specific row only when no rollback quantity found
+                format!(r#"
+                    UPDATE cust_BulkPicked
+                    SET PickedBulkQty = 0, PickedQty = 0
+                    WHERE RunNo = {} AND RowNum = {} AND LineId = {}
+                "#, run_no, row_num, line_id)
+            }
         } else {
-            // For entire batch, reset to 0 for ALL batches of this ingredient (preserve PickingDate)
+            // For entire ingredient unpick, reset ALL batches of this ingredient
             format!(r#"
-                UPDATE cust_BulkPicked 
+                UPDATE cust_BulkPicked
                 SET PickedBulkQty = 0, PickedQty = 0
                 WHERE RunNo = {} AND LineId = {}
             "#, run_no, line_id)
@@ -4032,9 +4062,18 @@ impl Database {
 
             // Use existing unpick_entire_batch function for each ingredient
             match self.unpick_entire_batch(run_no, row_num, line_id, user_id).await {
-                Ok(_) => {
+                Ok(response) => {
                     total_ingredients_processed += 1;
-                    info!("✅ Successfully unpicked ingredient: {}", item_key);
+                    // Check if this was an "already clean" response
+                    if let Some(operation_type) = response.get("operation_type") {
+                        if operation_type == "unpick_already_clean" {
+                            info!("✅ Ingredient {} already unpicked (no work needed)", item_key);
+                        } else {
+                            info!("✅ Successfully unpicked ingredient: {}", item_key);
+                        }
+                    } else {
+                        info!("✅ Successfully unpicked ingredient: {}", item_key);
+                    }
                 },
                 Err(e) => {
                     error!("❌ Failed to unpick ingredient {}: {}", item_key, e);
@@ -4334,22 +4373,37 @@ impl Database {
             .context("Failed to get database client")?;
 
         let query = r#"
-            SELECT 
+            SELECT
                 bp.BatchNo,
                 bp.ItemKey,
                 im.Desc1 as ItemDescription,
                 bp.ToPickedBulkQty,
                 ISNULL(bp.PickedBulkQty, 0) as PickedBulkQty,
                 bp.PackSize,
-                -- Calculate weight values
+                -- Calculate actual picked quantity from lot allocation records
+                ISNULL(actual_picked.ActualPickedQty, 0) as ActualPickedQty,
+                -- Calculate weight values using actual picked quantities
                 (bp.ToPickedBulkQty * bp.PackSize) as TotalWeightKG,
-                (ISNULL(bp.PickedBulkQty, 0) * bp.PackSize) as PickedWeightKG,
-                ((bp.ToPickedBulkQty - ISNULL(bp.PickedBulkQty, 0)) * bp.PackSize) as RemainingWeightKG,
+                (ISNULL(actual_picked.ActualPickedQty, 0) * bp.PackSize) as PickedWeightKG,
+                ((bp.ToPickedBulkQty - ISNULL(actual_picked.ActualPickedQty, 0)) * bp.PackSize) as RemainingWeightKG,
                 bp.RowNum,
                 bp.LineId
             FROM cust_BulkPicked bp
             LEFT JOIN INMAST im ON bp.ItemKey = im.Itemkey
-            WHERE bp.RunNo = @P1 
+            LEFT JOIN (
+                -- Calculate actual picked quantities from lot allocation records
+                SELECT
+                    blp.RunNo,
+                    blp.BatchNo,
+                    blp.ItemKey,
+                    SUM(ISNULL(blp.QtyReceived, 0) / blp.PackSize) as ActualPickedQty
+                FROM Cust_BulkLotPicked blp
+                WHERE blp.RunNo = @P1
+                GROUP BY blp.RunNo, blp.BatchNo, blp.ItemKey
+            ) actual_picked ON bp.RunNo = actual_picked.RunNo
+                AND bp.BatchNo = actual_picked.BatchNo
+                AND bp.ItemKey = actual_picked.ItemKey
+            WHERE bp.RunNo = @P1
               AND bp.ToPickedBulkQty > 0
             ORDER BY bp.ItemKey ASC, bp.BatchNo ASC, bp.LineId ASC
         "#;
@@ -4373,7 +4427,7 @@ impl Database {
             let item_key: &str = row.get("ItemKey").unwrap_or("");
             let item_description: Option<&str> = row.get("ItemDescription");
             let to_picked_bulk_qty: f64 = row.get("ToPickedBulkQty").unwrap_or(0.0);
-            let picked_bulk_qty: f64 = row.get("PickedBulkQty").unwrap_or(0.0);
+            let picked_bulk_qty: f64 = row.get("ActualPickedQty").unwrap_or(0.0); // Use actual picked from allocations
             let pack_size: f64 = row.get("PackSize").unwrap_or(0.0);
             let total_weight_kg: f64 = row.get("TotalWeightKG").unwrap_or(0.0);
             let picked_weight_kg: f64 = row.get("PickedWeightKG").unwrap_or(0.0);
@@ -4556,12 +4610,21 @@ impl Database {
                     bp.LineId,
                     bp.ItemKey,
                     SUM(bp.ToPickedBulkQty) as TotalRequired,
-                    SUM(ISNULL(bp.PickedBulkQty, 0)) as TotalPicked,
+                    -- Use allocation-based calculation instead of unreliable PickedBulkQty
+                    SUM(ISNULL(actual_picked.ActualPickedQty, 0)) as TotalPicked,
                     CASE
-                        WHEN SUM(ISNULL(bp.PickedBulkQty, 0)) >= SUM(bp.ToPickedBulkQty)
+                        WHEN SUM(ISNULL(actual_picked.ActualPickedQty, 0)) >= SUM(bp.ToPickedBulkQty)
                         THEN 1 ELSE 0
                     END as IsIngredientComplete
                 FROM cust_BulkPicked bp
+                LEFT JOIN (
+                    SELECT RunNo, ItemKey,
+                           SUM(ISNULL(QtyReceived, 0) / PackSize) as ActualPickedQty
+                    FROM Cust_BulkLotPicked
+                    WHERE RunNo = @P1
+                    GROUP BY RunNo, ItemKey
+                ) actual_picked ON bp.RunNo = actual_picked.RunNo
+                                AND bp.ItemKey = actual_picked.ItemKey
                 WHERE bp.RunNo = @P1
                   AND bp.ToPickedBulkQty > 0
                 GROUP BY bp.RunNo, bp.LineId, bp.ItemKey
@@ -4599,12 +4662,21 @@ impl Database {
                     bp.LineId,
                     bp.ItemKey,
                     SUM(bp.ToPickedBulkQty) as TotalRequired,
-                    SUM(ISNULL(bp.PickedBulkQty, 0)) as TotalPicked,
+                    -- Use allocation-based calculation instead of unreliable PickedBulkQty
+                    SUM(ISNULL(actual_picked.ActualPickedQty, 0)) as TotalPicked,
                     CASE
-                        WHEN SUM(ISNULL(bp.PickedBulkQty, 0)) >= SUM(bp.ToPickedBulkQty)
+                        WHEN SUM(ISNULL(actual_picked.ActualPickedQty, 0)) >= SUM(bp.ToPickedBulkQty)
                         THEN 'COMPLETE' ELSE 'INCOMPLETE'
                     END as Status
                 FROM cust_BulkPicked bp
+                LEFT JOIN (
+                    SELECT RunNo, ItemKey,
+                           SUM(ISNULL(QtyReceived, 0) / PackSize) as ActualPickedQty
+                    FROM Cust_BulkLotPicked
+                    WHERE RunNo = @P1
+                    GROUP BY RunNo, ItemKey
+                ) actual_picked ON bp.RunNo = actual_picked.RunNo
+                                AND bp.ItemKey = actual_picked.ItemKey
                 WHERE bp.RunNo = @P1
                   AND bp.ToPickedBulkQty > 0
                 GROUP BY bp.LineId, bp.ItemKey

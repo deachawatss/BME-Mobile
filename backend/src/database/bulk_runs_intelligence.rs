@@ -105,14 +105,14 @@ impl Database {
                 bp.Unit,
                 bp.TopickedStdQty,
                 bp.ToPickedBulkQty,
-                MAX(bp.PickedBulkQty) as PickedBulkQty,
+                SUM(ISNULL(bp.PickedBulkQty, 0)) as PickedBulkQty,
                 MAX(bp.PickingDate) as PickingDate,
                 MAX(bp.ItemBatchStatus) as Status,
                 -- Calculate completion status
                 CASE 
                     WHEN bp.ToPickedBulkQty <= 0 THEN 'NOT_REQUIRED'
-                    WHEN ISNULL(MAX(bp.PickedBulkQty), 0) >= bp.ToPickedBulkQty THEN 'COMPLETE'
-                    WHEN ISNULL(MAX(bp.PickedBulkQty), 0) > 0 THEN 'IN_PROGRESS'
+                    WHEN ISNULL(SUM(bp.PickedBulkQty), 0) >= bp.ToPickedBulkQty THEN 'COMPLETE'
+                    WHEN ISNULL(SUM(bp.PickedBulkQty), 0) > 0 THEN 'IN_PROGRESS'
                     ELSE 'PENDING'
                 END as CompletionStatus
             FROM cust_BulkPicked bp
