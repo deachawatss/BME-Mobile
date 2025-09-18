@@ -75,11 +75,11 @@ if exist "target\release\bulk_picking_backend.exe" (
 echo Production deployment complete!
 echo.
 echo Server will be available at:
-echo - Main Application: http://192.168.0.21:4400/
-echo - API Health Check: http://192.168.0.21:4400/api/health
-echo - Login Page: http://192.168.0.21:4400/login
-echo - Dashboard: http://192.168.0.21:4400/dashboard
-echo - Putaway: http://192.168.0.21:4400/putaway
+echo - Main Application: http://192.168.0.10:4400/
+echo - API Health Check: http://192.168.0.10:4400/api/health
+echo - Login Page: http://192.168.0.10:4400/login
+echo - Dashboard: http://192.168.0.10:4400/dashboard
+echo - Putaway: http://192.168.0.10:4400/putaway
 echo.
 echo Frontend: Built and ready to serve
 echo Backend: Built and starting...
