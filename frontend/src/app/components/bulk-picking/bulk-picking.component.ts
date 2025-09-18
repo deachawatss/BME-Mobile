@@ -7,6 +7,7 @@ import { BangkokTimezoneService } from '../../services/bangkok-timezone.service'
 import { PrintDataService, PrintLabelData } from '../../services/print-data.service';
 import { RunStatusManager, StatusTrigger } from '../../services/run-status-manager';
 import { DebugService } from '../../services/debug.service';
+import { ConfigService } from '../../services/config.service';
 import { HttpClientModule } from '@angular/common/http';
 import { debounceTime, distinctUntilChanged, tap, catchError } from 'rxjs/operators';
 import { Observable, throwError } from 'rxjs';
@@ -1589,6 +1590,7 @@ export class BulkPickingComponent implements AfterViewInit {
   private runStatusManager = inject(RunStatusManager);
   private cdr = inject(ChangeDetectorRef);
   private debug = inject(DebugService);
+  private config = inject(ConfigService);
 
   // Reactive signals for state management
   isSearchingRun = signal(false);
@@ -2174,7 +2176,13 @@ export class BulkPickingComponent implements AfterViewInit {
   // Story 1.2: Inventory management methods
   private refreshInventoryData(itemKey: string, expectedQty: number): void {
     if (!itemKey) return;
-    
+
+    // Check if inventory alerts feature is enabled
+    if (!this.config.isInventoryAlertsEnabled()) {
+      this.debug.info('BulkPicking', 'Inventory alerts feature is disabled via configuration');
+      return;
+    }
+
     this.bulkRunsService.getInventoryAlerts(itemKey, expectedQty).subscribe({
       next: (response) => {
         if (response.success && response.data) {
@@ -2186,9 +2194,9 @@ export class BulkPickingComponent implements AfterViewInit {
             stock_status: this.determineStockStatus(alerts),
             alerts: alerts
           };
-          
+
           this.currentInventoryStatus.set(status);
-          
+
           // Show alerts if there are critical issues
           if (alerts.some(a => a.severity === 'Critical')) {
             this.showInventoryAlerts.set(true);

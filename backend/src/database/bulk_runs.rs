@@ -3191,7 +3191,7 @@ impl Database {
         item_key: &str,
     ) -> Result<Vec<InventoryAlert>> {
         let mut alerts = Vec::new();
-        
+
         // Get current inventory info
         let inventory = self.get_inventory_info(run_no, item_key).await?;
         

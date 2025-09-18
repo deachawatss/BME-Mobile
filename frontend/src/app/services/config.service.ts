@@ -7,6 +7,7 @@ export interface AppConfig {
   frontendHost: string;
   frontendPort: number;
   enableDebug: boolean;
+  enableInventoryAlerts: boolean;
 }
 
 @Injectable({
@@ -22,7 +23,8 @@ export class ConfigService {
       production: environment.production,
       frontendHost: environment.frontendHost,
       frontendPort: environment.frontendPort,
-      enableDebug: environment.enableDebug
+      enableDebug: environment.enableDebug,
+      enableInventoryAlerts: environment.enableInventoryAlerts
     };
 
     if (this.config.enableDebug && !this.config.production) {
@@ -40,5 +42,9 @@ export class ConfigService {
 
   isProduction(): boolean {
     return this.config.production;
+  }
+
+  isInventoryAlertsEnabled(): boolean {
+    return this.config.enableInventoryAlerts;
   }
 }

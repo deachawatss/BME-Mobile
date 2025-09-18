@@ -7,5 +7,6 @@ export const environment = {
   frontendHost: 'localhost',
   frontendPort: 4200,
   enableDebug: true,
-  enableMockData: false
+  enableMockData: false,
+  enableInventoryAlerts: false
 };
