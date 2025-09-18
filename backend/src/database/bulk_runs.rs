@@ -4297,26 +4297,29 @@ impl Database {
         let item_key: &str = row.get("ItemKey").unwrap_or("");
         let alloc_lot_qty: f64 = row.get("AllocLotQty").unwrap_or(0.0);
         let pack_size: f64 = row.get("PackSize").context("PackSize must be available from cust_BulkPicked table")?;
-        let batch_no: &str = row.get("BatchNo").unwrap_or("");
+        let _batch_no: &str = row.get("BatchNo").unwrap_or("");
 
         info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, AllocLotQty: {} KG, PackSize: {} KG/bag",
               run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty, pack_size);
 
-        // Step 2: Get corresponding LotTransaction record for actual issued quantity AND collect LotTranNo values
+        // Step 2: Get specific LotTransaction record for the exact allocation being deleted
+        // FIXED: Instead of SUM() which aggregates all records, get the specific record tied to this LotTranNo
         let get_transaction_query = r#"
-            SELECT SUM(lt.QtyIssued) as ActualIssued,
-                   STRING_AGG(CAST(lt.LotTranNo AS VARCHAR), ',') as LotTranNos
+            SELECT lt.QtyIssued as ActualIssued,
+                   CAST(lt.LotTranNo AS VARCHAR) as LotTranNos
             FROM LotTransaction lt
-            WHERE lt.LotNo = @P1 AND lt.ItemKey = @P2 AND lt.BinNo = @P3 
-              AND lt.IssueDocNo = @P4 AND lt.TransactionType = 5 
+            INNER JOIN Cust_BulkLotPicked blp ON blp.LotTranNo = @P1
+            WHERE lt.LotNo = blp.LotNo
+              AND lt.ItemKey = blp.ItemKey
+              AND lt.BinNo = blp.BinNo
+              AND lt.IssueDocNo = blp.BatchNo
+              AND lt.TransactionType = 5
               AND lt.User5 = 'Picking Customization'
+              AND lt.QtyIssued = blp.AllocLotQty  -- Match specific quantity
         "#;
 
         let mut stmt = tiberius::Query::new(get_transaction_query);
-        stmt.bind(lot_no);
-        stmt.bind(item_key);
-        stmt.bind(bin_no);
-        stmt.bind(batch_no);
+        stmt.bind(lot_tran_no);
 
         let stream = stmt.query(client).await
             .context("Failed to get transaction record")?;
@@ -4332,7 +4335,7 @@ impl Database {
             (0.0, String::new())
         };
 
-        info!("✅ Found actual issued quantity: {} for lot: {}, bin: {}, LotTranNos: {}", actual_issued, lot_no, bin_no, lot_tran_nos_str);
+        info!("✅ Found specific issued quantity: {} for LotTranNo: {}, lot: {}, bin: {}", actual_issued, lot_tran_no, lot_no, bin_no);
 
         // Step 3: Rollback inventory commitment in LotMaster (inventory integrity first)
         if actual_issued > 0.0 {
@@ -4401,26 +4404,24 @@ impl Database {
             .context("Failed to update picked quantities")?;
         info!("✅ Updated picked quantities in cust_BulkPicked (Step 4 - subtracted {} bags = {} KG)", qty_in_bags, alloc_lot_qty);
 
-        // Step 5: Delete corresponding LotTransaction records (now works because Cust_BulkLotPicked still exists)
+        // Step 5: Delete the specific LotTransaction record tied to this allocation
         if !lot_tran_nos_str.is_empty() {
-            let delete_lot_transaction_query = format!(r#"
+            let delete_lot_transaction_query = r#"
                 DELETE FROM LotTransaction
                 WHERE TransactionType = 5
                   AND User5 = 'Picking Customization'
-                  AND LotTranNo IN ({lot_tran_nos_str})
-                  AND EXISTS (
-                      SELECT 1 FROM Cust_BulkLotPicked blp
-                      WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
-                      AND blp.LotNo = '{lot_no}' AND LotTransaction.IssueDocNo = blp.BatchNo
-                  )
-            "#);
+                  AND LotTranNo = @P1
+            "#;
 
-            client.simple_query(&delete_lot_transaction_query).await
-                .context("Failed to delete LotTransaction audit records in precise unpick")?;
+            let mut lt_stmt = tiberius::Query::new(delete_lot_transaction_query);
+            lt_stmt.bind(lot_tran_nos_str.parse::<i32>().unwrap_or(0));
 
-            info!("✅ Deleted LotTransaction audit records (Step 5 - audit cleanup) - lot: {}", lot_no);
+            lt_stmt.execute(client).await
+                .context("Failed to delete specific LotTransaction audit record in precise unpick")?;
+
+            info!("✅ Deleted specific LotTransaction audit record (Step 5 - audit cleanup) - LotTranNo: {}", lot_tran_nos_str);
         } else {
-            info!("⚠️ No LotTransaction records found to delete for precise unpick - lot: {}", lot_no);
+            info!("⚠️ No specific LotTransaction record found to delete for precise unpick - LotTranNo: {}", lot_tran_no);
         }
 
         // Step 6: Delete the specific allocation record using LotTranNo
