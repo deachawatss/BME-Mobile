@@ -26,7 +26,7 @@ const envVars = {
   // CSP Configuration
   CSP_API_HOST: process.env.CSP_API_HOST || 'localhost',
   CSP_API_PORT: process.env.CSP_API_PORT || '4400',
-  CSP_NETWORK_HOST: process.env.CSP_NETWORK_HOST || '192.168.0.10',
+  CSP_NETWORK_HOST: process.env.CSP_NETWORK_HOST || 'localhost',
   CSP_NETWORK_PORT: process.env.CSP_NETWORK_PORT || '4400',
   CSP_WS_PORT: process.env.CSP_WS_PORT || '4200'
 };
