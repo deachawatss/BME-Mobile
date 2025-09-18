@@ -204,63 +204,35 @@ async fn login(
         return Ok(Json(ApiResponse::error("Authentication is currently disabled")));
     }
 
-    // Try LDAP authentication with parallel attempts for better performance
-    let user_format_1 = format!("{}@NWFTH.com", request.username);
-    let user_format_2 = format!("{}@newlywedsfoods.co.th", request.username);
-    let user_format_3 = request.username.clone();
+    // Try both domain formats for LDAP authentication
+    let user_formats = vec![
+        format!("{}@NWFTH.com", request.username),
+        format!("{}@newlywedsfoods.co.th", request.username),
+        request.username.clone(),
+    ];
 
-    info!("🔍 Attempting parallel LDAP authentication");
+    for user_format in user_formats {
+        info!("🔍 Attempting LDAP authentication for: {}", user_format);
 
-    // Run all LDAP attempts in parallel and take the first successful one
-    let ldap_result = tokio::select! {
-        result1 = authenticate_ldap(&state.ldap_config, &user_format_1, &request.password) => {
-            match result1 {
-                Ok(user) => {
-                    info!("✅ LDAP authentication successful for: {}", user_format_1);
-                    Some(user)
-                }
-                Err(e) => {
-                    info!("❌ LDAP authentication failed for {}: {}", user_format_1, e);
-                    None
-                }
-            }
-        }
-        result2 = authenticate_ldap(&state.ldap_config, &user_format_2, &request.password) => {
-            match result2 {
-                Ok(user) => {
-                    info!("✅ LDAP authentication successful for: {}", user_format_2);
-                    Some(user)
-                }
-                Err(e) => {
-                    info!("❌ LDAP authentication failed for {}: {}", user_format_2, e);
-                    None
-                }
-            }
-        }
-        result3 = authenticate_ldap(&state.ldap_config, &user_format_3, &request.password) => {
-            match result3 {
-                Ok(user) => {
-                    info!("✅ LDAP authentication successful for: {}", user_format_3);
-                    Some(user)
-                }
-                Err(e) => {
-                    info!("❌ LDAP authentication failed for {}: {}", user_format_3, e);
-                    None
-                }
-            }
-        }
-    };
+        match authenticate_ldap(&state.ldap_config, &user_format, &request.password).await {
+            Ok(user) => {
+                info!("✅ LDAP authentication successful for: {}", user_format);
 
-    if let Some(user) = ldap_result {
-        // Generate proper JWT token
-        match state.auth_service.generate_token(&user) {
-            Ok(token) => {
-                let login_response = LoginResponse { token, user };
-                return Ok(Json(ApiResponse::success(login_response, "Authentication successful")));
+                // Generate proper JWT token
+                match state.auth_service.generate_token(&user) {
+                    Ok(token) => {
+                        let login_response = LoginResponse { token, user };
+                        return Ok(Json(ApiResponse::success(login_response, "Authentication successful")));
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to generate JWT token: {}", e);
+                        return Ok(Json(ApiResponse::error("Failed to generate authentication token")));
+                    }
+                }
             }
             Err(e) => {
-                error!("❌ Failed to generate JWT token: {}", e);
-                return Ok(Json(ApiResponse::error("Failed to generate authentication token")));
+                info!("❌ LDAP authentication failed for {}: {}", user_format, e);
+                continue;
             }
         }
     }
