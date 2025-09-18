@@ -10,7 +10,7 @@ module.exports = {
     extend: {
       colors: {
         'brand-brown': '#523325',
-        'brand-amber': '#F0B429', 
+        'brand-amber': '#F0B429',
         'brand-cream': '#F5F5DC',
         background: 'hsl(var(--color-background))',
         foreground: 'hsl(var(--color-foreground))',

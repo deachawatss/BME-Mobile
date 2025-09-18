@@ -556,7 +556,7 @@ interface ProductionRun {
                           id="remainingKg"
                           type="text"
                           formControlName="remainingKg"
-                          class="nwfth-input tw-w-16 tw-px-2 tw-py-2 tw-text-sm tw-font-mono tw-text-center"
+                          class="nwfth-input tw-w-24 tw-px-2 tw-py-2 tw-text-sm tw-font-mono tw-text-center"
                           [ngClass]="{'tw-bg-green-100 tw-text-green-800 tw-border-green-300': isCurrentIngredientCompleted(), 'tw-bg-gray-50': !isCurrentIngredientCompleted()}"
                           placeholder=""
                           readonly>
