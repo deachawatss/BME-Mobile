@@ -3849,64 +3849,7 @@ impl Database {
         info!("✅ Found {} LotTransaction records for rollback calculations (total qty: {}, LotTranNos: {})", 
               lot_rollbacks.len(), total_qty_to_rollback, all_lot_tran_nos.len());
 
-        // Step 2: Delete allocation records (official app pattern)
-        let delete_allocations_query = if let Some(lot) = specific_lot {
-            format!(r#"
-                DELETE FROM Cust_BulkLotPicked
-                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
-            "#)
-        } else {
-            // For batch unpick, delete ALL allocations for this ingredient (LineId) across all batches (RowNums)
-            format!(r#"
-                DELETE FROM Cust_BulkLotPicked
-                WHERE RunNo = {run_no} AND LineId = {line_id}
-            "#)
-        };
-
-        client.simple_query(&delete_allocations_query).await
-            .context("Failed to delete allocation records")?;
-        info!("✅ Deleted allocation records from Cust_BulkLotPicked");
-
-        // Step 3: Clean up pallet traceability records (mobile app only)
-        let delete_pallet_query = if let Some(_lot) = specific_lot {
-            format!(r#"
-                DELETE FROM Cust_BulkPalletLotPicked
-                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
-            "#) // Note: no lot-specific filter in this table
-        } else {
-            // For batch unpick, delete ALL pallet records for this ingredient (LineId) across all batches (RowNums)
-            format!(r#"
-                DELETE FROM Cust_BulkPalletLotPicked
-                WHERE RunNo = {run_no} AND LineId = {line_id}
-            "#)
-        };
-
-        client.simple_query(&delete_pallet_query).await
-            .context("Failed to delete pallet traceability records")?;
-        info!("✅ Deleted pallet traceability records");
-
-        // Step 4: Rollback inventory commitments in LotMaster with safety checks
-        // Only subtract what WE actually added, preserving pre-existing commitments
-        if !lot_rollbacks.is_empty() {
-            for (lot_no, item_key, bin_no, actual_issued) in &lot_rollbacks {
-                let rollback_query = format!(r#"
-                    UPDATE LotMaster
-                    SET QtyCommitSales = CASE
-                        WHEN QtyCommitSales - {actual_issued} < 0 THEN 0
-                        ELSE QtyCommitSales - {actual_issued}
-                    END
-                    WHERE ItemKey = '{item_key}' AND LotNo = '{lot_no}' AND BinNo = '{bin_no}'
-                "#);
-
-                client.simple_query(&rollback_query).await
-                    .with_context(|| format!("Failed to rollback inventory for lot {lot_no} bin {bin_no}"))?;
-                info!("✅ Rolled back {} qty for lot {} item {} bin {} (with safety check)", actual_issued, lot_no, item_key, bin_no);
-            }
-        } else {
-            info!("⚠️ No LotTransaction records found for QtyCommitSales rollback - allocation deletion will still proceed");
-        }
-
-        // Step 5: Reset picked quantities in cust_BulkPicked (preserve PickingDate)
+        // Step 2: Reset picked quantities in cust_BulkPicked (inventory integrity first)
         let reset_picked_query = if specific_lot.is_some() {
             // For specific lot unpick, use partial reduction with rollback quantity
             if total_qty_to_rollback > 0.0 {
@@ -3956,14 +3899,31 @@ impl Database {
 
         client.simple_query(&reset_picked_query).await
             .context("Failed to reset picked quantities")?;
-        info!("✅ Reset picked quantities in cust_BulkPicked");
+        info!("✅ Reset picked quantities in cust_BulkPicked (Step 2 - inventory integrity first)");
 
-        // Ensure transaction commit completion
-        info!("🔄 Transaction completed for unpick operation - database state now consistent");
+        // Step 3: Rollback inventory commitments in LotMaster with safety checks
+        // Only subtract what WE actually added, preserving pre-existing commitments
+        if !lot_rollbacks.is_empty() {
+            for (lot_no, item_key, bin_no, actual_issued) in &lot_rollbacks {
+                let rollback_query = format!(r#"
+                    UPDATE LotMaster
+                    SET QtyCommitSales = CASE
+                        WHEN QtyCommitSales - {actual_issued} < 0 THEN 0
+                        ELSE QtyCommitSales - {actual_issued}
+                    END
+                    WHERE ItemKey = '{item_key}' AND LotNo = '{lot_no}' AND BinNo = '{bin_no}'
+                "#);
 
-        // Step 6: Delete corresponding LotTransaction records for complete audit trail cleanup
-        // Use the collected LotTranNo values directly to avoid the EXISTS subquery problem
-        // (Previously failed because Cust_BulkLotPicked records were already deleted in Step 2)
+                client.simple_query(&rollback_query).await
+                    .with_context(|| format!("Failed to rollback inventory for lot {lot_no} bin {bin_no}"))?;
+                info!("✅ Rolled back {} qty for lot {} item {} bin {} (Step 3 - inventory rollback)", actual_issued, lot_no, item_key, bin_no);
+            }
+        } else {
+            info!("⚠️ No LotTransaction records found for QtyCommitSales rollback - deletion will still proceed");
+        }
+
+        // Step 4: Delete corresponding LotTransaction records for complete audit trail cleanup
+        // This now works because Cust_BulkLotPicked records still exist for the EXISTS check
         if !all_lot_tran_nos.is_empty() {
             let lot_tran_nos_str = all_lot_tran_nos.iter()
                 .map(|n| n.to_string())
@@ -4000,10 +3960,49 @@ impl Database {
             client.simple_query(&delete_lot_transaction_query).await
                 .context("Failed to delete LotTransaction audit records")?;
                 
-            info!("✅ Deleted {} LotTransaction records using direct LotTranNo list", all_lot_tran_nos.len());
+            info!("✅ Deleted {} LotTransaction records (Step 4 - audit cleanup)", all_lot_tran_nos.len());
         } else {
             info!("⚠️ No LotTransaction records found to delete (this is normal if records were created differently)");
         }
+
+        // Step 5: Delete allocation records (after audit cleanup)
+        let delete_allocations_query = if let Some(lot) = specific_lot {
+            format!(r#"
+                DELETE FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
+            "#)
+        } else {
+            // For batch unpick, delete ALL allocations for this ingredient (LineId) across all batches (RowNums)
+            format!(r#"
+                DELETE FROM Cust_BulkLotPicked
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
+        };
+
+        client.simple_query(&delete_allocations_query).await
+            .context("Failed to delete allocation records")?;
+        info!("✅ Deleted allocation records from Cust_BulkLotPicked (Step 5)");
+
+        // Step 6: Clean up pallet traceability records (mobile app only)
+        let delete_pallet_query = if let Some(_lot) = specific_lot {
+            format!(r#"
+                DELETE FROM Cust_BulkPalletLotPicked
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
+            "#) // Note: no lot-specific filter in this table
+        } else {
+            // For batch unpick, delete ALL pallet records for this ingredient (LineId) across all batches (RowNums)
+            format!(r#"
+                DELETE FROM Cust_BulkPalletLotPicked
+                WHERE RunNo = {run_no} AND LineId = {line_id}
+            "#)
+        };
+
+        client.simple_query(&delete_pallet_query).await
+            .context("Failed to delete pallet traceability records")?;
+        info!("✅ Deleted pallet traceability records (Step 6)");
+
+        // Ensure transaction commit completion
+        info!("🔄 Transaction completed for unpick operation - database state now consistent");
 
         // Return summary
         Ok(serde_json::json!({
@@ -4228,70 +4227,13 @@ impl Database {
 
         info!("✅ Found actual issued quantity: {} for lot: {}, bin: {}, LotTranNos: {}", actual_issued, lot_no, bin_no, lot_tran_nos_str);
 
-        // Step 3: Delete the specific allocation record using LotTranNo
-        let delete_allocation_query = r#"
-            DELETE FROM Cust_BulkLotPicked 
-            WHERE LotTranNo = @P1
-        "#;
-
-        let mut stmt = tiberius::Query::new(delete_allocation_query);
-        stmt.bind(lot_tran_no);
-
-        stmt.execute(client).await
-            .context("Failed to delete specific allocation record")?;
-        info!("✅ Deleted allocation record for LotTranNo: {}", lot_tran_no);
-
-        // Step 4: Clean up pallet traceability record if this was the only record for this ingredient
-        // Check if there are other allocation records for this ingredient
-        let check_remaining_query = r#"
-            SELECT COUNT(*) as RemainingCount
-            FROM Cust_BulkLotPicked 
-            WHERE RunNo = @P1 AND RowNum = @P2 AND LineId = @P3
-        "#;
-
-        let mut stmt = tiberius::Query::new(check_remaining_query);
-        stmt.bind(run_no);
-        stmt.bind(row_num);
-        stmt.bind(line_id);
-
-        let stream = stmt.query(client).await
-            .context("Failed to check remaining allocations")?;
-        
-        let rows: Vec<Row> = stream.into_first_result().await
-            .context("Failed to process remaining count")?;
-
-        let remaining_count: i32 = if let Some(row) = rows.first() {
-            row.get("RemainingCount").unwrap_or(0)
-        } else {
-            0
-        };
-
-        // Only delete pallet record if no more allocations remain for this ingredient
-        if remaining_count == 0 {
-            let delete_pallet_query = r#"
-                DELETE FROM Cust_BulkPalletLotPicked 
-                WHERE RunNo = @P1 AND RowNum = @P2 AND LineId = @P3
-            "#;
-
-            let mut stmt = tiberius::Query::new(delete_pallet_query);
-            stmt.bind(run_no);
-            stmt.bind(row_num);
-            stmt.bind(line_id);
-
-            stmt.execute(client).await
-                .context("Failed to delete pallet traceability record")?;
-            info!("✅ Deleted pallet traceability record (last allocation for ingredient)");
-        } else {
-            info!("ℹ️ Keeping pallet traceability record ({} allocations remaining)", remaining_count);
-        }
-
-        // Step 5: Rollback inventory commitment in LotMaster if there was actual issued quantity
+        // Step 3: Rollback inventory commitment in LotMaster (inventory integrity first)
         if actual_issued > 0.0 {
             let rollback_query = r#"
-                UPDATE LotMaster 
-                SET QtyCommitSales = CASE 
-                    WHEN QtyCommitSales - @P1 < 0 THEN 0 
-                    ELSE QtyCommitSales - @P1 
+                UPDATE LotMaster
+                SET QtyCommitSales = CASE
+                    WHEN QtyCommitSales - @P1 < 0 THEN 0
+                    ELSE QtyCommitSales - @P1
                 END
                 WHERE ItemKey = @P2 AND LotNo = @P3 AND BinNo = @P4
             "#;
@@ -4304,12 +4246,12 @@ impl Database {
 
             stmt.execute(client).await
                 .with_context(|| format!("Failed to rollback inventory for lot {lot_no} bin {bin_no}"))?;
-            info!("✅ Rolled back {} qty for lot {} item {} bin {} (with safety check)", actual_issued, lot_no, item_key, bin_no);
+            info!("✅ Rolled back {} qty for lot {} item {} bin {} (Step 3 - inventory rollback)", actual_issued, lot_no, item_key, bin_no);
         } else {
             info!("ℹ️ No LotTransaction record found - skipping inventory rollback");
         }
 
-        // Step 6: Update picked quantities in cust_BulkPicked (subtract the specific quantity)
+        // Step 4: Update picked quantities in cust_BulkPicked (subtract the specific quantity)
         // FIXED: Use separate variables to avoid calculation inconsistencies
         let update_picked_query = r#"
             UPDATE cust_BulkPicked
@@ -4350,10 +4292,9 @@ impl Database {
 
         stmt.execute(client).await
             .context("Failed to update picked quantities")?;
-        info!("✅ Updated picked quantities in cust_BulkPicked (subtracted {} bags = {} KG)", qty_in_bags, alloc_lot_qty);
+        info!("✅ Updated picked quantities in cust_BulkPicked (Step 4 - subtracted {} bags = {} KG)", qty_in_bags, alloc_lot_qty);
 
-        // Step 7: Delete corresponding LotTransaction records using direct LotTranNo approach (SAFE & CONSISTENT)
-        // This ensures consistency with the "Delete All" batch operation approach
+        // Step 5: Delete corresponding LotTransaction records (now works because Cust_BulkLotPicked still exists)
         if !lot_tran_nos_str.is_empty() {
             let delete_lot_transaction_query = format!(r#"
                 DELETE FROM LotTransaction
@@ -4367,14 +4308,71 @@ impl Database {
                   )
             "#);
 
-            // Execute the DELETE operation to clean up LotTransaction audit records
             client.simple_query(&delete_lot_transaction_query).await
                 .context("Failed to delete LotTransaction audit records in precise unpick")?;
-                
-            info!("✅ Deleted LotTransaction audit records using direct LotTranNo approach for precise unpick - lot: {}", lot_no);
+
+            info!("✅ Deleted LotTransaction audit records (Step 5 - audit cleanup) - lot: {}", lot_no);
         } else {
             info!("⚠️ No LotTransaction records found to delete for precise unpick - lot: {}", lot_no);
         }
+
+        // Step 6: Delete the specific allocation record using LotTranNo
+        let delete_allocation_query = r#"
+            DELETE FROM Cust_BulkLotPicked
+            WHERE LotTranNo = @P1
+        "#;
+
+        let mut stmt = tiberius::Query::new(delete_allocation_query);
+        stmt.bind(lot_tran_no);
+
+        stmt.execute(client).await
+            .context("Failed to delete specific allocation record")?;
+        info!("✅ Deleted allocation record for LotTranNo: {} (Step 6)", lot_tran_no);
+
+        // Step 7: Clean up pallet traceability record if this was the only record for this ingredient
+        // Check if there are other allocation records for this ingredient
+        let check_remaining_query = r#"
+            SELECT COUNT(*) as RemainingCount
+            FROM Cust_BulkLotPicked 
+            WHERE RunNo = @P1 AND RowNum = @P2 AND LineId = @P3
+        "#;
+
+        let mut stmt = tiberius::Query::new(check_remaining_query);
+        stmt.bind(run_no);
+        stmt.bind(row_num);
+        stmt.bind(line_id);
+
+        let stream = stmt.query(client).await
+            .context("Failed to check remaining allocations")?;
+        
+        let rows: Vec<Row> = stream.into_first_result().await
+            .context("Failed to process remaining count")?;
+
+        let remaining_count: i32 = if let Some(row) = rows.first() {
+            row.get("RemainingCount").unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Only delete pallet record if no more allocations remain for this ingredient
+        if remaining_count == 0 {
+            let delete_pallet_query = r#"
+                DELETE FROM Cust_BulkPalletLotPicked 
+                WHERE RunNo = @P1 AND RowNum = @P2 AND LineId = @P3
+            "#;
+
+            let mut stmt = tiberius::Query::new(delete_pallet_query);
+            stmt.bind(run_no);
+            stmt.bind(row_num);
+            stmt.bind(line_id);
+
+            stmt.execute(client).await
+                .context("Failed to delete pallet traceability record")?;
+            info!("✅ Deleted pallet traceability record (Step 7 - last allocation for ingredient)");
+        } else {
+            info!("ℹ️ Keeping pallet traceability record ({} allocations remaining)", remaining_count);
+        }
+
 
         // Return summary
         Ok(serde_json::json!({
