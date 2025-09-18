@@ -22,6 +22,7 @@ const envVars = {
   PRODUCTION: process.env.PRODUCTION || 'false',
   DEBUG: process.env.DEBUG || 'false',
   ENABLE_MOCK_DATA: process.env.ENABLE_MOCK_DATA || 'false',
+  ENABLE_INVENTORY_ALERTS: process.env.ENABLE_INVENTORY_ALERTS || 'false',
   // CSP Configuration
   CSP_API_HOST: process.env.CSP_API_HOST || 'localhost',
   CSP_API_PORT: process.env.CSP_API_PORT || '4400',
@@ -40,7 +41,8 @@ export const environment = {
   frontendHost: '${envVars.FRONTEND_HOST}',
   frontendPort: ${envVars.FRONTEND_PORT},
   enableDebug: ${envVars.DEBUG},
-  enableMockData: ${envVars.ENABLE_MOCK_DATA}
+  enableMockData: ${envVars.ENABLE_MOCK_DATA},
+  enableInventoryAlerts: ${envVars.ENABLE_INVENTORY_ALERTS}
 };
 `;
 
@@ -58,7 +60,8 @@ export const environment = {
   frontendHost: '${envVars.FRONTEND_HOST}',
   frontendPort: ${envVars.FRONTEND_PORT},
   enableDebug: false, // Always false in production
-  enableMockData: false // Always false in production
+  enableMockData: false, // Always false in production
+  enableInventoryAlerts: ${envVars.ENABLE_INVENTORY_ALERTS}
 };
 `;
 
