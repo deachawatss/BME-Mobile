@@ -418,7 +418,7 @@ export class BulkRunsService {
   /**
    * Search for bulk runs by query
    */
-  searchBulkRuns(query: string): Observable<ApiResponse<BulkRunSearchResponse[]>> {
+  searchBulkRuns(query: string, searchMode: string = 'partial'): Observable<ApiResponse<BulkRunSearchResponse[]>> {
     if (!query.trim()) {
       return throwError(() => new Error('Search query is required'));
     }
@@ -426,7 +426,9 @@ export class BulkRunsService {
     this.isLoading.set(true);
     this.errorMessage.set(null);
 
-    const params = new HttpParams().set('query', query.trim());
+    const params = new HttpParams()
+      .set('query', query.trim())
+      .set('search_mode', searchMode);
 
     return this.http.get<ApiResponse<BulkRunSearchResponse[]>>(`${this.baseUrl}/search`, { params })
       .pipe(

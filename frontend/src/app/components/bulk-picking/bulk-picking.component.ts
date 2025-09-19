@@ -1874,7 +1874,7 @@ export class BulkPickingComponent implements AfterViewInit {
 
     this.isSearchingRun.set(true);
 
-    this.bulkRunsService.searchBulkRuns(runNumber).subscribe({
+    this.bulkRunsService.searchBulkRuns(runNumber, 'exact').subscribe({
       next: (response) => {
         this.isSearchingRun.set(false);
         
@@ -3565,7 +3565,7 @@ export class BulkPickingComponent implements AfterViewInit {
       this.loadPalletTrackingData(runNumber, currentItemKey);
       
       // Refresh search results to update ingredient status indicators
-      this.bulkRunsService.searchBulkRuns(runNumber).subscribe({
+      this.bulkRunsService.searchBulkRuns(runNumber, 'partial').subscribe({
         next: (response) => {
           if (response.success && response.data && response.data.length > 0) {
             this.searchResults.set(response.data);
@@ -4773,6 +4773,14 @@ export class BulkPickingComponent implements AfterViewInit {
   openRunSelectionModal(): void {
     this.showRunModal.set(true);
     this.modalError.set(null);
+
+    // Clear search state - Always start with fresh modal
+    this.searchControl.setValue('');           // Clear search input
+    this.hasSearchedRuns.set(false);          // Reset search state
+    this.searchResultRuns.set([]);            // Clear search results
+    this.showAllRuns.set(true);               // Show all runs mode
+    this.currentPage.set(1);                  // Reset to first page
+
     this.loadAvailableRuns();
   }
 
@@ -4814,7 +4822,7 @@ export class BulkPickingComponent implements AfterViewInit {
     });
   }
 
-  // Search functionality for bulk runs modal
+  // Search functionality for bulk runs modal with client-side partial matching
   performRunSearch(query: string): void {
     if (!query.trim()) {
       // If empty query, show all runs and clear search state
@@ -4825,34 +4833,20 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
 
-    // Perform search
-    this.isSearchingRuns.set(true);
+    // Client-side filtering with partial matching for user-friendly search
+    const allRuns = this.modalRuns();
+    const searchTerm = query.trim().toLowerCase();
+
+    const filteredRuns = allRuns.filter(run =>
+      run.run_no.toString().includes(query.trim()) ||                        // Partial matching on run number (e.g., "5000" finds 5000007, 5000004)
+      run.formula_id.toLowerCase().includes(searchTerm) ||                   // Partial matching on formula ID
+      run.formula_desc.toLowerCase().includes(searchTerm)                    // Partial matching on description
+    );
+
+    this.searchResultRuns.set(filteredRuns);
     this.showAllRuns.set(false);
     this.hasSearchedRuns.set(true);
-
-    this.bulkRunsService.searchBulkRuns(query).subscribe({
-      next: (response) => {
-        this.isSearchingRuns.set(false);
-        if (response.success && response.data) {
-          // Extract runs from search results
-          const runs: BulkRunSummary[] = response.data.map(result => ({
-            run_no: result.run.run_no,
-            formula_id: result.run.formula_id,
-            formula_desc: result.run.formula_desc,
-            status: result.run.status,
-            batch_count: result.run.no_of_batches
-          }));
-          this.searchResultRuns.set(runs);
-        } else {
-          this.searchResultRuns.set([]);
-        }
-      },
-      error: (error) => {
-        this.isSearchingRuns.set(false);
-        this.searchResultRuns.set([]);
-        console.error('Search error:', error);
-      }
-    });
+    this.isSearchingRuns.set(false); // No loading needed for client-side filtering
   }
 
   // Get the current display runs (either search results or all runs)

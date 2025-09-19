@@ -145,44 +145,73 @@ impl Database {
 
     /// Search for bulk runs by run number
     #[instrument(skip(self))]
-    pub async fn search_bulk_runs(&self, search_query: &str) -> Result<Vec<BulkRun>> {
-        info!("Searching bulk runs with query: {}", search_query);
+    pub async fn search_bulk_runs(&self, search_query: &str, search_mode: &str) -> Result<Vec<BulkRun>> {
+        info!("Searching bulk runs with query: {} (mode: {})", search_query, search_mode);
 
         let mut client = self
             .get_client()
             .await
             .context("Failed to get read database client")?;
 
-        // Search in Cust_BulkRun table
-        let query = r#"
-            SELECT 
-                RunNo,
-                BatchNo,
-                FormulaId,
-                FormulaDesc,
-                NoOfBatches,
-                PalletsPerBatch,
-                Status,
-                RecDate
-            FROM Cust_BulkRun 
-            WHERE RunNo = @P1 
-               OR BatchNo LIKE '%' + @P2 + '%'
-               OR FormulaId LIKE '%' + @P3 + '%'
-            ORDER BY RunNo DESC
-        "#;
+        // Different query based on search mode
+        let (query, mut select) = if search_mode == "exact" {
+            // Exact matching: only search by RunNo
+            let query = r#"
+                SELECT
+                    RunNo,
+                    BatchNo,
+                    FormulaId,
+                    FormulaDesc,
+                    NoOfBatches,
+                    PalletsPerBatch,
+                    Status,
+                    RecDate
+                FROM Cust_BulkRun
+                WHERE RunNo = @P1
+                ORDER BY RunNo DESC
+            "#;
+            let mut select = TiberiusQuery::new(query);
 
-        let mut select = TiberiusQuery::new(query);
-
-        // Try to parse as run number, otherwise use as string search
-        if let Ok(run_no) = search_query.parse::<i32>() {
-            select.bind(run_no);
-            select.bind(search_query);
-            select.bind(search_query);
+            // For exact mode, only accept numeric run numbers
+            if let Ok(run_no) = search_query.parse::<i32>() {
+                select.bind(run_no);
+            } else {
+                // If not a number, bind -1 to ensure no results for exact mode
+                select.bind(-1);
+            }
+            (query, select)
         } else {
-            select.bind(-1); // Invalid run number to force string searches
-            select.bind(search_query);
-            select.bind(search_query);
-        }
+            // Partial matching: search across RunNo, BatchNo, and FormulaId
+            let query = r#"
+                SELECT
+                    RunNo,
+                    BatchNo,
+                    FormulaId,
+                    FormulaDesc,
+                    NoOfBatches,
+                    PalletsPerBatch,
+                    Status,
+                    RecDate
+                FROM Cust_BulkRun
+                WHERE RunNo = @P1
+                   OR BatchNo LIKE '%' + @P2 + '%'
+                   OR FormulaId LIKE '%' + @P3 + '%'
+                ORDER BY RunNo DESC
+            "#;
+            let mut select = TiberiusQuery::new(query);
+
+            // Try to parse as run number, otherwise use as string search
+            if let Ok(run_no) = search_query.parse::<i32>() {
+                select.bind(run_no);
+                select.bind(search_query);
+                select.bind(search_query);
+            } else {
+                select.bind(-1); // Invalid run number to force string searches
+                select.bind(search_query);
+                select.bind(search_query);
+            }
+            (query, select)
+        };
 
         let stream = select
             .query(&mut client)

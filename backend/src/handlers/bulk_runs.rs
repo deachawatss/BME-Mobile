@@ -70,6 +70,8 @@ pub async fn search_bulk_runs(
 
     let empty_string = String::new();
     let query = params.get("query").unwrap_or(&empty_string).trim();
+    let default_mode = "partial".to_string();
+    let search_mode = params.get("search_mode").unwrap_or(&default_mode).trim();
 
     if query.is_empty() {
         warn!("Empty search query provided");
@@ -82,7 +84,7 @@ pub async fn search_bulk_runs(
 
     let service = BulkRunsService::new(database);
 
-    match service.search_bulk_runs(query).await {
+    match service.search_bulk_runs(query, search_mode).await {
         Ok(results) => {
             let results_len = results.len();
             if results.is_empty() {

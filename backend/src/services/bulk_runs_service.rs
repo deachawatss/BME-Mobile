@@ -17,12 +17,12 @@ impl BulkRunsService {
 
     /// Search for bulk runs and return search response
     #[instrument(skip(self))]
-    pub async fn search_bulk_runs(&self, query: &str) -> Result<Vec<BulkRunSearchResponse>> {
-        info!("Processing bulk run search for query: {}", query);
+    pub async fn search_bulk_runs(&self, query: &str, search_mode: &str) -> Result<Vec<BulkRunSearchResponse>> {
+        info!("Processing bulk run search for query: {} (mode: {})", query, search_mode);
 
         let runs = self
             .database
-            .search_bulk_runs(query)
+            .search_bulk_runs(query, search_mode)
             .await
             .context("Failed to search bulk runs")?;
 
@@ -319,8 +319,8 @@ impl BulkRunsService {
     pub async fn get_available_runs(&self) -> Result<Vec<BulkRun>> {
         info!("Getting available bulk runs");
 
-        // Search for runs with NEW status
-        let all_runs = self.database.search_bulk_runs("").await?;
+        // Search for runs with NEW status (use partial mode for listing all runs)
+        let all_runs = self.database.search_bulk_runs("", "partial").await?;
 
         let available_runs = all_runs
             .into_iter()
