@@ -256,7 +256,7 @@ interface ProductionRun {
                       <button
                         type="button"
                         (mousedown)="onSearchButtonMouseDown()"
-                        (click)="searchRun()"
+                        (click)="searchRun(true)"
                         class="search-btn"
                         [disabled]="isSearchingRun()"
                         aria-label="Search run number">
@@ -1848,15 +1848,22 @@ export class BulkPickingComponent implements AfterViewInit {
   }
 
   // Search functions
-  searchRun(): void {
-    const runNumber = this.productionForm.get('runNumber')?.value?.trim();
-
+  searchRun(fromButton: boolean = false): void {
     // Reset all field interaction states since user is taking action
     this.searchButtonClicked = false;
     this.runFieldClicked = false;
     this.previousRunValue = '';
 
-    // Story 1.1.1: Show modal if run number field is blank
+    // Always open modal when clicked via Search button (BME-like behavior)
+    if (fromButton) {
+      this.openRunSelectionModal();
+      return;
+    }
+
+    // Enter key behavior: process input field value for direct lookup
+    const runNumber = this.productionForm.get('runNumber')?.value?.trim();
+
+    // Show modal if run number field is blank
     if (!runNumber) {
       this.openRunSelectionModal();
       return;
@@ -1866,7 +1873,7 @@ export class BulkPickingComponent implements AfterViewInit {
     this.resetComponentState();
 
     this.isSearchingRun.set(true);
-    
+
     this.bulkRunsService.searchBulkRuns(runNumber).subscribe({
       next: (response) => {
         this.isSearchingRun.set(false);
