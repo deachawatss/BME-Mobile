@@ -154,7 +154,7 @@ impl Database {
             .context("Failed to get read database client")?;
 
         // Different query based on search mode
-        let (query, mut select) = if search_mode == "exact" {
+        let (_query, select) = if search_mode == "exact" {
             // Exact matching: only search by RunNo
             let query = r#"
                 SELECT
