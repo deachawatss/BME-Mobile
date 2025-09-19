@@ -88,20 +88,8 @@ echo Press Ctrl+C to stop the server
 echo ========================================
 echo.
 
-REM Set environment variable for detailed logging
-set RUST_LOG=bulk_picking_backend=info,tower_http=info,axum=info
-
-REM Start the backend server with logging
-echo Starting server with logging enabled...
-echo Logs will be displayed in console and saved to: logs\server.log
-echo Log level: %RUST_LOG%
-if not exist "logs" mkdir logs
-
-REM Try tee first, fallback to basic redirect if tee not available
-%BACKEND_EXE% 2>&1 | tee logs\server.log 2>nul || (
-    echo tee command not available, using basic logging...
-    %BACKEND_EXE% > logs\server.log 2>&1
-)
+REM Start the backend server
+%BACKEND_EXE%
 
 REM If the server exits, show a message
 echo.
