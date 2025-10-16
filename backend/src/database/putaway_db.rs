@@ -545,10 +545,10 @@ impl PutawayDatabase {
             ).await.map_err(|e| PutawayError::TransactionError(format!("Failed to update destination bin: {e}")))?;
         } else {
             // Destination bin doesn't have this lot - create new record
-            // Get lot details from source for the new record
+            // Get lot details from source bin for the new record (must match exact source bin)
             let source_details_result = client.query(
-                "SELECT TOP 1 DateReceived, DateExpiry, VendorKey, VendorLotNo, QtyCommitSales, LotStatus FROM LotMaster WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3",
-                &[&lot_no, &item_key, &location]
+                "SELECT TOP 1 DateReceived, DateExpiry, VendorKey, VendorLotNo, QtyCommitSales, LotStatus FROM LotMaster WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4",
+                &[&lot_no, &item_key, &location, &bin_from]
             ).await.map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
 
             if let Some(source_row) = source_details_result
@@ -562,7 +562,8 @@ impl PutawayDatabase {
                     source_row.get("DateExpiry").unwrap_or(*now);
                 let vendor_key: &str = source_row.get("VendorKey").unwrap_or("");
                 let vendor_lot_no: &str = source_row.get("VendorLotNo").unwrap_or("");
-                let lot_status: &str = source_row.get("LotStatus").unwrap_or("P");
+                // Preserve NULL status - do not default to "P"
+                let lot_status: Option<&str> = source_row.get("LotStatus");
 
                 // Create new LotMaster record for destination bin
                 let insert_query = r#"
