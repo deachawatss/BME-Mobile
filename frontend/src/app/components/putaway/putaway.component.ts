@@ -511,7 +511,7 @@ export class PutawayComponent implements AfterViewInit {
           qtyOnHand: lotDetails.qty_on_hand,
           qtyAvail: lotDetails.qty_available,
           expDate: lotDetails.expiry_date || '',
-          lotStatus: lotDetails.lot_status || 'P'
+          lotStatus: lotDetails.lot_status || ''
         });
         
         this.populateReadonlyFields(this.selectedLot()!);
@@ -817,7 +817,7 @@ export class PutawayComponent implements AfterViewInit {
       qtyOnHand: lotItem.qty_on_hand,
       qtyAvail: lotItem.qty_available,
       expDate: lotItem.expiry_date || '',
-      lotStatus: lotItem.lot_status || 'P'
+      lotStatus: lotItem.lot_status || ''
     };
 
     // Set the selected lot and populate form

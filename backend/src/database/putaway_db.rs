@@ -67,7 +67,7 @@ impl PutawayDatabase {
                 document_no: row.get::<&str, _>("DocumentNo").unwrap_or("").to_string(),
                 document_line_no: row.get::<i16, _>("DocumentLineNo").unwrap_or(0),
                 transaction_type: row.get::<u8, _>("TransactionType").unwrap_or(0),
-                lot_status: row.get::<&str, _>("LotStatus").unwrap_or("P").to_string(),
+                lot_status: row.get::<&str, _>("LotStatus").unwrap_or("").to_string(),
             };
 
             let item_record = ItemMasterRecord {
@@ -845,7 +845,7 @@ impl PutawayDatabase {
                         qty_available,
                         expiry_date,
                         uom: row.get::<&str, _>("Stockuomcode").unwrap_or("").to_string(),
-                        lot_status: row.get::<&str, _>("LotStatus").unwrap_or("P").to_string(),
+                        lot_status: row.get::<&str, _>("LotStatus").unwrap_or("").to_string(),
                     });
                 }
 
