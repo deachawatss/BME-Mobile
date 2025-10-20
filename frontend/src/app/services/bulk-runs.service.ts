@@ -393,7 +393,7 @@ export class BulkRunsService {
 
     const params = new HttpParams()
       .set('page', page.toString())
-      .set('limit', limit.toString());
+      .set('page_size', limit.toString());
 
     return this.http.get<ApiResponse<PaginatedBulkRunResponse>>(`${this.baseUrl}/list/paginated`, { params })
       .pipe(

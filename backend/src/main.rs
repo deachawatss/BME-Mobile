@@ -619,8 +619,8 @@ async fn main() {
         ldap_config.url, ldap_config.base_dn
     );
 
-    // Initialize database connection
-    let database = database::Database::new().expect("Failed to initialize database");
+    // Initialize database connection with pooling
+    let database = database::Database::new().await.expect("Failed to initialize database with connection pool");
 
     // Validate authentication tables exist in database
     info!("🔍 Validating authentication tables in database...");

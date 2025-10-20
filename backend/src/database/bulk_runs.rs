@@ -1877,14 +1877,59 @@ impl Database {
         
         info!("✅ CONNECTION_FRESH: Main transaction client connected with clean state");
 
-        // **🚀 SIMPLE OPERATION MODE** - Use SQL Server auto-commit without explicit transactions
-        // **ROOT CAUSE SOLUTION**: Remove explicit BEGIN TRANSACTION to prevent error 266
-        // SQL Server's auto-commit mode handles each statement atomically
-        info!("🚀 AUTO_COMMIT: Using SQL Server auto-commit mode (prevents error 266)");
-        info!("✅ SIMPLE_MODE: Starting 6-step bulk picking operations with auto-commit");
+        // **🔒 TRANSACTION ATOMICITY FIX** - Use explicit BEGIN TRANSACTION for data integrity
+        // **CRITICAL**: This ensures all 6 steps are atomic - either ALL succeed or ALL are rolled back
+        // This prevents data corruption from partial transactions (e.g., step 3 fails but steps 1-2 already committed)
+        info!("🔒 BEGIN_TRANSACTION: Starting explicit transaction for atomic 6-step bulk picking");
+
+        // Set REPEATABLE READ isolation level for stronger consistency
+        client.simple_query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").await
+            .context("Failed to set isolation level")?;
+        info!("✅ ISOLATION_LEVEL: Set to REPEATABLE READ for data consistency");
+
+        client.simple_query("BEGIN TRANSACTION").await
+            .context("Failed to begin transaction")?;
+        info!("✅ TRANSACTION_STARTED: All 6 steps will be atomic (all-or-nothing)");
 
         // Transaction wrapper: Execute all 6 steps and handle rollback on error
         let transaction_result: Result<PickConfirmationResponse> = async {
+
+        // **🔒 STEP 0: LOCK LOTMASTER FIRST** - Global lock order to prevent deadlocks
+        // This ensures LotMaster is locked before any application tables
+        info!("🔒 STEP_0_LOCK: Acquiring exclusive lock on LotMaster to prevent deadlocks");
+
+        let lock_lot_query = r#"
+            SELECT LotNo, ItemKey, QtyOnHand, QtyCommitSales
+            FROM LotMaster WITH (UPDLOCK, ROWLOCK)
+            WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4
+        "#;
+
+        let mut lock_stmt = TiberiusQuery::new(lock_lot_query);
+        lock_stmt.bind(request.lot_no.clone());
+        lock_stmt.bind(batch_info.item_key.clone());
+        lock_stmt.bind("TFC1");
+        lock_stmt.bind(request.bin_no.clone());
+
+        let lock_result = lock_stmt.query(&mut client).await
+            .context("Failed to lock LotMaster record")?;
+
+        let lot_row = lock_result.into_row().await?
+            .ok_or_else(|| anyhow::anyhow!("Lot not found for locking"))?;
+
+        let current_qty_on_hand: f64 = lot_row.get("QtyOnHand").unwrap_or(0.0);
+        let current_qty_commit: f64 = lot_row.get("QtyCommitSales").unwrap_or(0.0);
+        let available_qty = current_qty_on_hand - current_qty_commit;
+
+        // Validate sufficient quantity BEFORE any updates
+        if picked_qty_f64 > available_qty {
+            return Err(anyhow::anyhow!(
+                "Insufficient quantity: requested {}, available {}",
+                picked_qty_f64, available_qty
+            ));
+        }
+
+        info!("✅ STEP_0_LOCKED: LotMaster locked successfully - Lot: {}, Available: {} KG",
+              request.lot_no, available_qty);
 
         // **STEP 1: UPDATE cust_BulkPicked** - Set picked quantities and timestamps
         info!("🔄 DEBUG: STEP 1 - Updating cust_BulkPicked table");
@@ -2359,10 +2404,10 @@ impl Database {
             }
         }
 
-            // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully with smart completion detection
-            info!("🎉 AUTO_COMMIT_COMPLETE: All 6-step bulk picking operations completed successfully (smart completion enabled)");
-            info!("✅ SIMPLE_MODE_SUCCESS: Each operation auto-committed - all changes permanent");
-            info!("🔄 TRANSACTION_TIMESTAMP: Pick transaction fully committed at {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC"));
+            // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully
+            info!("🎉 TRANSACTION_COMPLETE: All 6-step bulk picking operations completed successfully");
+            info!("✅ ALL_STEPS_SUCCEEDED: Ready to commit transaction");
+            info!("🔄 TRANSACTION_TIMESTAMP: Pick transaction completed at {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC"));
 
             Ok(PickConfirmationResponse {
                 success: true,
@@ -2372,16 +2417,24 @@ impl Database {
             })
         }.await;
 
-        // **🔥 SIMPLE ERROR HANDLING** - Each operation uses auto-commit, no rollback needed
+        // **🔒 ATOMIC TRANSACTION HANDLING** - COMMIT on success, ROLLBACK on error
         match transaction_result {
             Ok(response) => {
-                info!("✅ AUTO_COMMIT_SUCCESS: All operations completed successfully with auto-commit");
+                // All 6 steps succeeded - commit the transaction
+                client.simple_query("COMMIT").await
+                    .context("Failed to commit bulk picking transaction")?;
+
+                info!("✅ TRANSACTION_COMMITTED: All 6 steps permanently saved to database");
+                info!("🎯 SUCCESS: Bulk picking transaction completed atomically for run {}", run_no);
                 Ok(response)
             },
             Err(e) => {
-                warn!("💥 OPERATION_FAILED: Error during bulk picking operations: {}", e);
-                error!("🔍 AUTO_COMMIT_NOTE: Failed operations auto-rolled back by SQL Server");
-                Err(anyhow::anyhow!("BULK_PICKING_FAILED: {}", e))
+                // Any step failed - rollback the entire transaction
+                let _ = client.simple_query("ROLLBACK").await;
+
+                error!("💥 TRANSACTION_ROLLED_BACK: Error during bulk picking - all changes reverted: {}", e);
+                error!("🔄 DATA_INTEGRITY: No partial state - database remains consistent");
+                Err(anyhow::anyhow!("BULK_PICKING_FAILED_AND_ROLLED_BACK: {}", e))
             }
         }
     }

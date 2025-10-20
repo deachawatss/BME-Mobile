@@ -238,6 +238,20 @@ impl PutawayDatabase {
             .await
             .map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
 
+        // **🔒 BEGIN TRANSACTION** - Ensure atomic 6-step putaway operation
+        // Set REPEATABLE READ isolation level for stronger consistency
+        client
+            .simple_query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .await
+            .map_err(|e| PutawayError::DatabaseError(format!("Failed to set isolation level: {e}")))?;
+
+        client
+            .simple_query("BEGIN TRANSACTION")
+            .await
+            .map_err(|e| PutawayError::DatabaseError(format!("Failed to begin transaction: {e}")))?;
+
+        // Execute all 6 steps in a transaction
+        let transaction_result: Result<String, PutawayError> = async {
         // 1. Get next BT document number
         let bt_number = self.get_next_bt_sequence().await?;
         let document_no = format!("BT-{bt_number:08}");
@@ -249,6 +263,27 @@ impl PutawayDatabase {
         } else {
             user_id
         };
+
+        // **🔒 STEP 1.5: LOCK LOTMASTER FIRST** - Prevent deadlocks by acquiring locks in global order
+        // Lock BOTH source and destination bins in alphabetical order to prevent circular waits
+        let lock_lots_query = r#"
+            SELECT LotNo, ItemKey, LocationKey, BinNo, QtyOnHand, QtyCommitSales
+            FROM LotMaster WITH (UPDLOCK, ROWLOCK)
+            WHERE (LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4)
+               OR (LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P5)
+            ORDER BY BinNo ASC
+        "#;
+
+        let locked_lots = client.query(lock_lots_query, &[&lot_no, &item_key, &location, &bin_from, &bin_to])
+            .await
+            .map_err(|e| PutawayError::DatabaseError(format!("Failed to lock LotMaster records: {e}")))?
+            .into_results()
+            .await
+            .map_err(|e| PutawayError::DatabaseError(format!("Failed to get locked lots: {e}")))?;
+
+        if locked_lots.is_empty() || locked_lots[0].is_empty() {
+            return Err(PutawayError::ValidationError("Source bin not found for locking".to_string()));
+        }
 
         // 2. Create Mintxdh record for audit trail
         let inloc_record = self.get_inloc_record(item_key, location).await?;
@@ -471,6 +506,25 @@ impl PutawayDatabase {
         .await?;
 
         Ok(document_no)
+        }.await;
+
+        // **🔒 COMMIT or ROLLBACK** - Atomic transaction handling
+        match transaction_result {
+            Ok(doc_no) => {
+                // All 6 steps succeeded - commit the transaction
+                client
+                    .simple_query("COMMIT")
+                    .await
+                    .map_err(|e| PutawayError::DatabaseError(format!("Failed to commit transaction: {e}")))?;
+
+                Ok(doc_no)
+            }
+            Err(e) => {
+                // Any step failed - rollback the entire transaction
+                let _ = client.simple_query("ROLLBACK").await;
+                Err(e)
+            }
+        }
     }
 
     /// Handle lot consolidation logic for LotMaster records
