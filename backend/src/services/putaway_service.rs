@@ -104,7 +104,7 @@ impl PutawayService {
             request.remarks.as_deref().unwrap_or(""),
             request.referenced.as_deref().unwrap_or(""),
         ).await {
-            Ok(document_no) => {
+            Ok((document_no, source_lot_status, destination_lot_status)) => {
                 Ok(TransferResult {
                     success: true,
                     document_no,
@@ -120,6 +120,8 @@ impl PutawayService {
                         )
                     },
                     timestamp: bangkok_now_rfc3339(),
+                    source_lot_status,
+                    destination_lot_status,
                 })
             }
             Err(e) => {
@@ -128,6 +130,8 @@ impl PutawayService {
                     document_no: String::new(),
                     message: format!("Transfer failed: {e}"),
                     timestamp: bangkok_now_rfc3339(),
+                    source_lot_status: None,
+                    destination_lot_status: None,
                 })
             }
         }
@@ -192,13 +196,24 @@ impl PutawayService {
     }
 
     /// Search for bins with pagination
-    pub async fn search_bins_paginated(&self, query: Option<&str>, page: i32, limit: i32) -> Result<(Vec<BinSearchItem>, i32), PutawayError> {
+    ///
+    /// When lot_no, item_key, and location are provided, the search will LEFT JOIN with LotMaster
+    /// to show if the bin contains this lot and what status it has (helps users see consolidation targets)
+    pub async fn search_bins_paginated(
+        &self,
+        query: Option<&str>,
+        page: i32,
+        limit: i32,
+        lot_no: Option<&str>,
+        item_key: Option<&str>,
+        location: Option<&str>,
+    ) -> Result<(Vec<BinSearchItem>, i32), PutawayError> {
         // Validate inputs
         let safe_page = if page < 1 { 1 } else { page };
         let safe_limit = if limit > 100 { 100 } else if limit < 1 { 20 } else { limit };
-        
-        // Search in database with pagination
-        self.db.search_bins_paginated(query, safe_page, safe_limit).await
+
+        // Search in database with pagination and lot context
+        self.db.search_bins_paginated(query, safe_page, safe_limit, lot_no, item_key, location).await
     }
 }
 

@@ -129,7 +129,10 @@ async fn search_lots(
 }
 
 /// Search for bins with optional query filter and pagination
-/// GET /api/putaway/bins/search?query={search_term}&page={page}&limit={limit}
+/// GET /api/putaway/bins/search?query={search_term}&page={page}&limit={limit}&lot_no={lot}&item_key={item}&location={loc}
+///
+/// When lot_no, item_key, and location are provided, the search will LEFT JOIN with LotMaster
+/// to show if the bin contains this lot and what status it has (helps users see consolidation targets)
 async fn search_bins(
     State(database): State<Database>,
     Query(params): Query<HashMap<String, String>>,
@@ -145,7 +148,12 @@ async fn search_bins(
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(20); // Default limit
 
-    match service.search_bins_paginated(query, page, limit).await {
+    // Extract optional lot context for bin status display
+    let lot_no = params.get("lot_no").map(|s| s.as_str());
+    let item_key = params.get("item_key").map(|s| s.as_str());
+    let location = params.get("location").map(|s| s.as_str());
+
+    match service.search_bins_paginated(query, page, limit, lot_no, item_key, location).await {
         Ok((bins, total)) => {
             let total_pages = ((total as f64) / (limit as f64)).ceil() as i32;
             Ok(Json(json!({

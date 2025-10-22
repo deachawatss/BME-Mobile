@@ -167,6 +167,49 @@ npm run test:e2e     # runs Playwright E2E tests
 - **Solution**: Removed `AND b.Nettable = 1` filter from `search_lots_for_run_item_paginated()` in `backend/src/database/bulk_runs.rs:1035,1088`
 - **Impact**: Mobile app now shows all 4 lots matching official BME4 system behavior perfectly
 
+### 🚨 CRITICAL: Putaway Transfer Lot Disappearance Bug Fix (2025-01-22)
+- **Problem**: Lots completely disappeared from database during full bin transfers when destination bin didn't already have that lot
+- **Root Cause**: Fatal logic error in `handle_lot_consolidation()` - code deleted source bin record BEFORE querying it for lot details needed to create destination record
+- **Sequence**:
+  1. Full transfer (remaining_qty = 0) → DELETE source bin record
+  2. Destination doesn't have lot → Query DELETED source bin for details
+  3. Query returns nothing → INSERT to destination never happens
+  4. **Result**: Lot disappears - not in source (deleted), not in destination (never created)
+- **Example**: Transfer 20kg Lot 2506789 from T1210-1B (only has 20kg) to A0304-3A (doesn't have this lot) → 20kg vanishes
+- **Solution**: Query source lot details FIRST (Step 0) before potential deletion, save details, use saved data for destination INSERT
+- **Files Modified**: `backend/src/database/putaway_db.rs` - `handle_lot_consolidation()` method (lines 580-600)
+- **Impact**: Prevents data loss during all putaway transfers, ensures data integrity for full and partial transfers
+
+### ⚠️ CRITICAL PUTAWAY TRANSFER LOGIC DOCUMENTATION
+
+**Putaway transfers move the SAME lot between bins (NOT between different lots):**
+- Transfer: `Lot 2506789` from `Bin T1210-1B` → `Bin A0304-3A`
+- Same LotNo in both source and destination bins
+- **Cannot transfer "Lot A to Lot B"** - this makes no sense conceptually
+- A single lot can exist in multiple bins simultaneously with different or same statuses
+
+**Database Structure (LotMaster table):**
+- Composite Primary Key: `(LotNo, ItemKey, LocationKey, BinNo)`
+- Same lot can have multiple records - one per bin location
+- Each bin-lot combination can have different `LotStatus` values
+- Example: Lot 2506789 exists in 3 bins with different statuses:
+  - A0304-3A: 740kg, Status C
+  - A0308-2A: 360kg, Status C
+  - T1307-2A: 720kg, Status B
+
+**Transfer Logic Order (CRITICAL - DO NOT REORDER):**
+1. **Step 0**: Query source lot details FIRST (before deletion) - saves DateReceived, DateExpiry, VendorKey, VendorLotNo, LotStatus
+2. **Step 1**: Update/delete source bin record (delete if remaining_qty = 0, update otherwise)
+3. **Step 2a**: Check if destination bin already has this lot
+4. **Step 2b**: If yes → Add quantities (lot consolidation: QtyOnHand_dest += transfer_qty)
+5. **Step 2c**: If no → Create new LotMaster record using saved source details from Step 0
+
+**Why Step 0 is CRITICAL:**
+- Full transfers (transfer_qty = QtyAvailable) DELETE the source bin record
+- If we query source AFTER deletion (old buggy code), query returns nothing
+- Without source details, destination INSERT fails silently
+- Lot disappears completely from database
+
 ### Key Improvements
 - **Simplified Architecture**: Single database pattern eliminates sync complexity and improves performance
 - **Type Safety**: Safe conversion patterns for BIGINT/INT SQL Server types

@@ -42,6 +42,8 @@ pub struct TransferResult {
     pub document_no: String,
     pub message: String,
     pub timestamp: String,
+    pub source_lot_status: Option<String>,
+    pub destination_lot_status: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -74,6 +76,9 @@ pub struct BinSearchItem {
     pub aisle: String,
     pub row: String,
     pub rack: String,
+    /// Lot status if this bin contains the specified lot (optional - only populated when lot context is provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lot_status: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

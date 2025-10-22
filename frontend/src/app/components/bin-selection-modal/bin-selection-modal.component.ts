@@ -209,6 +209,7 @@ import { PutawayService, BinSearchItem, PaginatedBinSearchResponse } from '../..
 export class BinSelectionModalComponent {
   @Input() isOpen = signal(false);
   initialFilter = input<string>(''); // Convert to signal-based input
+  lotContext = input<{ lot_no: string; item_key: string; location: string } | undefined>(undefined); // Lot context for status display
   @Output() binSelected = new EventEmitter<BinSearchItem>();
   @Output() modalClosed = new EventEmitter<void>();
 
@@ -286,9 +287,10 @@ export class BinSelectionModalComponent {
 
     try {
       const response = await this.putawayService.searchBinsWithPagination(
-        query || undefined, 
-        page, 
-        this.pageLimit()
+        query || undefined,
+        page,
+        this.pageLimit(),
+        this.lotContext() // Pass lot context for status display
       ).toPromise();
       
       if (response) {

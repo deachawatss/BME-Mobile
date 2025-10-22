@@ -81,6 +81,7 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[60px] md:tw-min-w-[80px]">Location</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[70px] md:tw-min-w-[100px]">Bin</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-right tw-font-semibold tw-text-gray-700 tw-min-w-[90px] md:tw-min-w-[120px]">Qty Available</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Lot Status</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Action</th>
                 </tr>
               </thead>
@@ -97,6 +98,11 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
                   <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-break-words tw-text-xs md:tw-text-sm">{{ lot.current_bin }}</td>
                   <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-right tw-text-gray-700 tw-whitespace-nowrap tw-text-xs md:tw-text-sm">
                     {{ lot.qty_available.toFixed(3) }} {{ lot.uom }}
+                  </td>
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-xs md:tw-text-sm">
+                    <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-gray-100 tw-text-gray-800 tw-font-medium tw-text-xs">
+                      {{ lot.lot_status || 'N/A' }}
+                    </span>
                   </td>
                   <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center">
                     <button
@@ -150,6 +156,12 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
                 <div class="tw-flex tw-justify-between">
                   <span class="tw-text-gray-500">Qty Available:</span>
                   <span class="tw-text-gray-900 tw-font-medium">{{ lot.qty_available.toFixed(3) }} {{ lot.uom }}</span>
+                </div>
+                <div class="tw-flex tw-justify-between">
+                  <span class="tw-text-gray-500">Lot Status:</span>
+                  <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-gray-100 tw-text-gray-800 tw-font-medium tw-text-xs">
+                    {{ lot.lot_status || 'N/A' }}
+                  </span>
                 </div>
               </div>
             </div>

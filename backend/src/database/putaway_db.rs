@@ -230,7 +230,7 @@ impl PutawayDatabase {
         user_id: &str,
         remarks: &str,
         referenced: &str,
-    ) -> Result<String, PutawayError> {
+    ) -> Result<(String, Option<String>, Option<String>), PutawayError> {
         // Get database client (TFCPILOT3 primary)
         let mut client = self
             .db
@@ -517,13 +517,41 @@ impl PutawayDatabase {
                     .await
                     .map_err(|e| PutawayError::DatabaseError(format!("Failed to commit transaction: {e}")))?;
 
-                Ok(doc_no)
+                // Query source lot status (from original bin, may have been deleted if full transfer)
+                let source_status = self.get_lot_status(&mut client, lot_no, item_key, location, bin_from).await;
+
+                // Query destination lot status (should exist after transfer)
+                let dest_status = self.get_lot_status(&mut client, lot_no, item_key, location, bin_to).await;
+
+                Ok((doc_no, source_status, dest_status))
             }
             Err(e) => {
                 // Any step failed - rollback the entire transaction
                 let _ = client.simple_query("ROLLBACK").await;
                 Err(e)
             }
+        }
+    }
+
+    /// Get lot status from LotMaster for a specific bin
+    async fn get_lot_status(
+        &self,
+        client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,
+        lot_no: &str,
+        item_key: &str,
+        location: &str,
+        bin_no: &str,
+    ) -> Option<String> {
+        let query = "SELECT LotStatus FROM LotMaster WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4";
+
+        match client.query(query, &[&lot_no, &item_key, &location, &bin_no]).await {
+            Ok(stream) => {
+                match stream.into_row().await {
+                    Ok(Some(row)) => row.get::<&str, _>("LotStatus").map(|s| s.to_string()),
+                    _ => None,
+                }
+            }
+            Err(_) => None,
         }
     }
 
@@ -548,6 +576,28 @@ impl PutawayDatabase {
         } else {
             user_id
         };
+
+        // **Step 0: Query source lot details FIRST (before potential deletion)**
+        // CRITICAL: This must happen before Step 1 because full transfers delete the source record.
+        // If we query after deletion, we'll lose lot details and the destination INSERT will fail,
+        // causing lots to disappear from the database entirely.
+        let source_details_result = client.query(
+            "SELECT DateReceived, DateExpiry, VendorKey, VendorLotNo, QtyCommitSales, LotStatus FROM LotMaster WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4",
+            &[&lot_no, &item_key, &location, &bin_from]
+        ).await.map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
+
+        let source_details = source_details_result
+            .into_row()
+            .await
+            .map_err(|e| PutawayError::DatabaseError(e.to_string()))?
+            .ok_or_else(|| PutawayError::ValidationError("Source lot not found before transfer".to_string()))?;
+
+        // Extract and save all source details for later use (needed for destination INSERT)
+        let date_received: NaiveDateTime = source_details.get("DateReceived").unwrap_or(*now);
+        let date_expiry: NaiveDateTime = source_details.get("DateExpiry").unwrap_or(*now);
+        let vendor_key: String = source_details.get::<&str, _>("VendorKey").unwrap_or("").to_string();
+        let vendor_lot_no: String = source_details.get::<&str, _>("VendorLotNo").unwrap_or("").to_string();
+        let lot_status: Option<String> = source_details.get::<&str, _>("LotStatus").map(|s| s.to_string());
 
         // Step 1: Update source bin - reduce QtyOnHand or delete if becomes 0
         let source_update_result = client.query(
@@ -599,65 +649,44 @@ impl PutawayDatabase {
             ).await.map_err(|e| PutawayError::TransactionError(format!("Failed to update destination bin: {e}")))?;
         } else {
             // Destination bin doesn't have this lot - create new record
-            // Get lot details from source bin for the new record (must match exact source bin)
-            let source_details_result = client.query(
-                "SELECT TOP 1 DateReceived, DateExpiry, VendorKey, VendorLotNo, QtyCommitSales, LotStatus FROM LotMaster WHERE LotNo = @P1 AND ItemKey = @P2 AND LocationKey = @P3 AND BinNo = @P4",
-                &[&lot_no, &item_key, &location, &bin_from]
-            ).await.map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
+            // Use source lot details saved in Step 0 (before potential deletion)
+            let insert_query = r#"
+                INSERT INTO LotMaster (
+                    LotNo, ItemKey, LocationKey, DateReceived, DateExpiry,
+                    QtyReceived, QtyIssued, QtyCommitSales, QtyOnHand,
+                    DocumentNo, DocumentLineNo, TransactionType, VendorKey, VendorLotNo,
+                    QtyOnOrder, RecUserId, Recdate, BinNo, LotStatus
+                ) VALUES (
+                    @P1, @P2, @P3, @P4, @P5, @P6, 0, 0, @P6, @P7, 1, 8, @P8, @P9,
+                    0, @P10, @P11, @P12, @P13
+                )
+            "#;
 
-            if let Some(source_row) = source_details_result
-                .into_row()
+            client
+                .execute(
+                    insert_query,
+                    &[
+                        &lot_no,
+                        &item_key,
+                        &location,
+                        &date_received,
+                        &date_expiry,
+                        &transfer_qty,
+                        &document_no,
+                        &vendor_key,
+                        &vendor_lot_no,
+                        &user_id_truncated,
+                        now,
+                        &bin_to,
+                        &lot_status,
+                    ],
+                )
                 .await
-                .map_err(|e| PutawayError::DatabaseError(e.to_string()))?
-            {
-                let date_received: NaiveDateTime =
-                    source_row.get("DateReceived").unwrap_or(*now);
-                let date_expiry: NaiveDateTime =
-                    source_row.get("DateExpiry").unwrap_or(*now);
-                let vendor_key: &str = source_row.get("VendorKey").unwrap_or("");
-                let vendor_lot_no: &str = source_row.get("VendorLotNo").unwrap_or("");
-                // Preserve NULL status - do not default to "P"
-                let lot_status: Option<&str> = source_row.get("LotStatus");
-
-                // Create new LotMaster record for destination bin
-                let insert_query = r#"
-                    INSERT INTO LotMaster (
-                        LotNo, ItemKey, LocationKey, DateReceived, DateExpiry, 
-                        QtyReceived, QtyIssued, QtyCommitSales, QtyOnHand,
-                        DocumentNo, DocumentLineNo, TransactionType, VendorKey, VendorLotNo,
-                        QtyOnOrder, RecUserId, Recdate, BinNo, LotStatus
-                    ) VALUES (
-                        @P1, @P2, @P3, @P4, @P5, @P6, 0, 0, @P6, @P7, 1, 8, @P8, @P9,
-                        0, @P10, @P11, @P12, @P13
-                    )
-                "#;
-
-                client
-                    .execute(
-                        insert_query,
-                        &[
-                            &lot_no,
-                            &item_key,
-                            &location,
-                            &date_received,
-                            &date_expiry,
-                            &transfer_qty,
-                            &document_no,
-                            &vendor_key,
-                            &vendor_lot_no,
-                            &user_id_truncated,
-                            now,
-                            &bin_to,
-                            &lot_status,
-                        ],
-                    )
-                    .await
-                    .map_err(|e| {
-                        PutawayError::TransactionError(format!(
-                            "Failed to create destination record: {e}"
-                        ))
-                    })?;
-            }
+                .map_err(|e| {
+                    PutawayError::TransactionError(format!(
+                        "Failed to create destination record: {e}"
+                    ))
+                })?;
         }
 
         Ok(())
@@ -910,11 +939,17 @@ impl PutawayDatabase {
     }
 
     /// Search for bins with optional query filter and pagination (READ operation - uses TFCPILOT3)
+    ///
+    /// When lot_no, item_key, and location are provided, LEFT JOIN with LotMaster to show
+    /// if the bin contains this lot and what status it has (helps users see consolidation targets)
     pub async fn search_bins_paginated(
         &self,
         query: Option<&str>,
         page: i32,
         limit: i32,
+        lot_no: Option<&str>,
+        item_key: Option<&str>,
+        location: Option<&str>,
     ) -> Result<(Vec<BinSearchItem>, i32), PutawayError> {
         let mut client = self
             .db
@@ -924,7 +959,10 @@ impl PutawayDatabase {
 
         let offset = (page - 1) * limit;
 
-        // First, get total count
+        // Determine if we have lot context for LEFT JOIN
+        let has_lot_context = lot_no.is_some() && item_key.is_some() && location.is_some();
+
+        // First, get total count (count doesn't need lot join, just bin count)
         let count_query = if let Some(_search_term) = query {
             r#"
                 SELECT COUNT(*) as total_count
@@ -969,33 +1007,102 @@ impl PutawayDatabase {
             }
         };
 
-        // Then get paginated results
-        let sql_query = if let Some(_search_term) = query {
-            r#"
-                SELECT 
-                    Location, BinNo, Description, aisle, row, rack, RecDate
-                FROM BINMaster
-                WHERE BinNo LIKE @P1 OR Location LIKE @P1 OR Description LIKE @P1
-                ORDER BY RecDate DESC
-                OFFSET @P2 ROWS FETCH NEXT @P3 ROWS ONLY
-            "#
-        } else {
-            r#"
-                SELECT 
-                    Location, BinNo, Description, aisle, row, rack, RecDate
-                FROM BINMaster
-                ORDER BY RecDate DESC
-                OFFSET @P1 ROWS FETCH NEXT @P2 ROWS ONLY
-            "#
+        // Then get paginated results - conditionally LEFT JOIN with LotMaster if lot context provided
+        let sql_query = match (has_lot_context, query.is_some()) {
+            // Case 1: Has lot context AND search query
+            (true, true) => {
+                r#"
+                    SELECT
+                        b.Location, b.BinNo, b.Description, b.aisle, b.row, b.rack, b.RecDate,
+                        l.LotStatus
+                    FROM BINMaster b
+                    LEFT JOIN LotMaster l ON
+                        l.LotNo = @P1 AND
+                        l.ItemKey = @P2 AND
+                        l.LocationKey = @P3 AND
+                        l.BinNo = b.BinNo
+                    WHERE b.BinNo LIKE @P4 OR b.Location LIKE @P4 OR b.Description LIKE @P4
+                    ORDER BY b.RecDate DESC
+                    OFFSET @P5 ROWS FETCH NEXT @P6 ROWS ONLY
+                "#
+            },
+            // Case 2: Has lot context but NO search query
+            (true, false) => {
+                r#"
+                    SELECT
+                        b.Location, b.BinNo, b.Description, b.aisle, b.row, b.rack, b.RecDate,
+                        l.LotStatus
+                    FROM BINMaster b
+                    LEFT JOIN LotMaster l ON
+                        l.LotNo = @P1 AND
+                        l.ItemKey = @P2 AND
+                        l.LocationKey = @P3 AND
+                        l.BinNo = b.BinNo
+                    ORDER BY b.RecDate DESC
+                    OFFSET @P4 ROWS FETCH NEXT @P5 ROWS ONLY
+                "#
+            },
+            // Case 3: No lot context but HAS search query
+            (false, true) => {
+                r#"
+                    SELECT
+                        Location, BinNo, Description, aisle, row, rack, RecDate
+                    FROM BINMaster
+                    WHERE BinNo LIKE @P1 OR Location LIKE @P1 OR Description LIKE @P1
+                    ORDER BY RecDate DESC
+                    OFFSET @P2 ROWS FETCH NEXT @P3 ROWS ONLY
+                "#
+            },
+            // Case 4: No lot context and NO search query
+            (false, false) => {
+                r#"
+                    SELECT
+                        Location, BinNo, Description, aisle, row, rack, RecDate
+                    FROM BINMaster
+                    ORDER BY RecDate DESC
+                    OFFSET @P1 ROWS FETCH NEXT @P2 ROWS ONLY
+                "#
+            },
         };
 
-        let results = if let Some(search_term) = query {
-            let search_pattern = format!("%{search_term}%");
-            client
-                .query(sql_query, &[&search_pattern, &offset, &limit])
-                .await
-        } else {
-            client.query(sql_query, &[&offset, &limit]).await
+        // Execute query with appropriate parameters based on lot context and search query
+        let results = match (has_lot_context, query) {
+            // Case 1: Has lot context AND search query
+            (true, Some(search_term)) => {
+                let search_pattern = format!("%{search_term}%");
+                let lot_no_param = lot_no.unwrap(); // Safe because has_lot_context is true
+                let item_key_param = item_key.unwrap();
+                let location_param = location.unwrap();
+                client.query(
+                    sql_query,
+                    &[&lot_no_param, &item_key_param, &location_param, &search_pattern, &offset, &limit]
+                ).await
+            },
+            // Case 2: Has lot context but NO search query
+            (true, None) => {
+                let lot_no_param = lot_no.unwrap(); // Safe because has_lot_context is true
+                let item_key_param = item_key.unwrap();
+                let location_param = location.unwrap();
+                client.query(
+                    sql_query,
+                    &[&lot_no_param, &item_key_param, &location_param, &offset, &limit]
+                ).await
+            },
+            // Case 3: No lot context but HAS search query
+            (false, Some(search_term)) => {
+                let search_pattern = format!("%{search_term}%");
+                client.query(
+                    sql_query,
+                    &[&search_pattern, &offset, &limit]
+                ).await
+            },
+            // Case 4: No lot context and NO search query
+            (false, None) => {
+                client.query(
+                    sql_query,
+                    &[&offset, &limit]
+                ).await
+            },
         };
 
         match results {
@@ -1007,6 +1114,13 @@ impl PutawayDatabase {
                     .map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
 
                 for row in rows {
+                    // Get lot status if available (only present when lot context was provided)
+                    let lot_status = if has_lot_context {
+                        row.get::<&str, _>("LotStatus").map(|s| s.to_string())
+                    } else {
+                        None
+                    };
+
                     bins.push(BinSearchItem {
                         bin_no: row.get::<&str, _>("BinNo").unwrap_or("").to_string(),
                         location: row.get::<&str, _>("Location").unwrap_or("").to_string(),
@@ -1014,6 +1128,7 @@ impl PutawayDatabase {
                         aisle: row.get::<&str, _>("aisle").unwrap_or("").to_string(),
                         row: row.get::<&str, _>("row").unwrap_or("").to_string(),
                         rack: row.get::<&str, _>("rack").unwrap_or("").to_string(),
+                        lot_status,
                     });
                 }
 

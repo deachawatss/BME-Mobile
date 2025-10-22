@@ -295,15 +295,30 @@ export class PutawayService {
   /**
    * Search for bins with pagination support
    * Enhanced version with server-side pagination
+   *
+   * When lotContext is provided, the search will show if each bin contains
+   * the specified lot and what status it has (helps users see consolidation targets)
    */
-  searchBinsWithPagination(query?: string, page: number = 1, limit: number = 20): Observable<PaginatedBinSearchResponse> {
+  searchBinsWithPagination(
+    query?: string,
+    page: number = 1,
+    limit: number = 20,
+    lotContext?: { lot_no: string; item_key: string; location: string }
+  ): Observable<PaginatedBinSearchResponse> {
     let params = new HttpParams();
     if (query) {
       params = params.set('query', query);
     }
     params = params.set('page', page.toString());
     params = params.set('limit', limit.toString());
-    
+
+    // Add lot context parameters if provided
+    if (lotContext) {
+      params = params.set('lot_no', lotContext.lot_no);
+      params = params.set('item_key', lotContext.item_key);
+      params = params.set('location', lotContext.location);
+    }
+
     return this.http.get<PaginatedBinSearchResponse>(`${this.baseUrl}/putaway/bins/search`, { params });
   }
 
@@ -356,6 +371,8 @@ export interface TransactionResponse {
   document_no: string;
   message: string;
   timestamp: string;
+  source_lot_status?: string;
+  destination_lot_status?: string;
 }
 
 export interface HealthResponse {
@@ -385,6 +402,7 @@ export interface BinSearchItem {
   aisle: string;
   row: string;
   rack: string;
+  lot_status?: string; // Optional: lot status if this bin contains the specified lot
 }
 
 export interface PaginatedBinSearchResponse {

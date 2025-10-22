@@ -430,13 +430,25 @@ export class PutawayComponent implements AfterViewInit {
     const putawayQtyValid = form.get('putawayQty')?.valid;
     const putawayQtyValue = form.get('putawayQty')?.value ?? 0;
     const maxQty = this.maxQuantity();
-    
+
     // Simplified validation - only check essential fields
     // toBinNumber will be validated at submit time to avoid Angular computed signal reactivity issues
-    return lot !== null && 
-           putawayQtyValid && 
+    return lot !== null &&
+           putawayQtyValid &&
            putawayQtyValue > 0 &&
            putawayQtyValue <= maxQty;
+  });
+
+  // Lot context for bin selection modal (shows lot status in bins that contain this lot)
+  binLotContext = computed(() => {
+    const lot = this.selectedLot();
+    if (!lot) return undefined;
+
+    return {
+      lot_no: lot.lotNumber,
+      item_key: lot.itemKey,
+      location: lot.location
+    };
   });
 
   // Computed button class based on form validity and processing state
@@ -669,7 +681,9 @@ export class PutawayComponent implements AfterViewInit {
           bin_from: lot.binNumber,
           bin_to: formValues.toBinNumber,
           timestamp: new Date().toISOString(),
-          should_print: formValues.printReport || false
+          should_print: formValues.printReport || false,
+          source_lot_status: result.source_lot_status,
+          destination_lot_status: result.destination_lot_status
         };
         
         // Step 6: Complete
@@ -1026,21 +1040,36 @@ export class PutawayComponent implements AfterViewInit {
     }
   }
 
+  private formatLotStatus(sourceStatus: string, destStatus?: string): string {
+    // If no destination status or statuses are the same, return source only
+    if (!destStatus || sourceStatus === destStatus) {
+      return sourceStatus || 'N/A';
+    }
+    // Show both statuses: "B - C" format
+    return `${sourceStatus} - ${destStatus}`;
+  }
+
   printTransferReceipt(transactionDetails: any, lot: LotDetails, formValues: any) {
     if (!transactionDetails || !lot) return;
 
     // Format date as DD-MM-YY
     const now = new Date();
     const formattedDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getFullYear()).slice(2)}`;
-    
+
     // Format quantities with 3 decimal places
     const qtyOnHand = parseFloat(lot.qtyOnHand.toString()).toFixed(3);
     const qtyTransfer = parseFloat(transactionDetails.transfer_qty.toString()).toFixed(3);
-    
+
+    // Format lot status (shows "B - C" if statuses differ)
+    const lotStatusDisplay = this.formatLotStatus(
+      lot.lotStatus,
+      transactionDetails.destination_lot_status
+    );
+
     // Pad strings to fixed widths for alignment
     const padEnd = (str: string, length: number) => str.padEnd(length);
     const padStart = (str: string, length: number) => str.padStart(length);
-    
+
     // Create warehouse-style report with 86-character width
     const reportLines = [
       `Bin Transfer Report                    Date:${formattedDate}`,
@@ -1052,11 +1081,11 @@ export class PutawayComponent implements AfterViewInit {
       'Bins/Lots from where material is transferred:',
       'LotNo           BinFrom          BinTo           Qtyonhand    QtyTransfer  Status',
       '======================================================================================',
-      `${padEnd(transactionDetails.lot_no, 16)}${padEnd(transactionDetails.bin_from, 17)}${padEnd(transactionDetails.bin_to, 16)}${padStart(qtyOnHand, 12)} ${padStart(qtyTransfer, 11)}  ${padEnd(lot.lotStatus, 6)}`
+      `${padEnd(transactionDetails.lot_no, 16)}${padEnd(transactionDetails.bin_from, 17)}${padEnd(transactionDetails.bin_to, 16)}${padStart(qtyOnHand, 12)} ${padStart(qtyTransfer, 11)}  ${padEnd(lotStatusDisplay, 11)}`
     ];
-    
+
     const reportContent = reportLines.join('\n');
-    
+
     // Print directly without preview using hidden iframe
     this.printDirectly(reportContent, transactionDetails.document_no);
   }
