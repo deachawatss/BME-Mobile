@@ -100,7 +100,7 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
                     {{ lot.qty_available.toFixed(3) }} {{ lot.uom }}
                   </td>
                   <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-xs md:tw-text-sm">
-                    <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-gray-100 tw-text-gray-800 tw-font-medium tw-text-xs">
+                    <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-amber-100 tw-text-amber-800 tw-font-medium tw-text-xs">
                       {{ lot.lot_status || 'N/A' }}
                     </span>
                   </td>
@@ -159,7 +159,7 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
                 </div>
                 <div class="tw-flex tw-justify-between">
                   <span class="tw-text-gray-500">Lot Status:</span>
-                  <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-gray-100 tw-text-gray-800 tw-font-medium tw-text-xs">
+                  <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-amber-100 tw-text-amber-800 tw-font-medium tw-text-xs">
                     {{ lot.lot_status || 'N/A' }}
                   </span>
                 </div>
