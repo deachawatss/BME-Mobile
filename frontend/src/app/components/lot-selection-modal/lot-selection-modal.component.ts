@@ -75,31 +75,31 @@ import { PutawayService, LotSearchItem, PaginatedLotSearchResponse } from '../..
             <table class="tw-w-full md:tw-min-w-[600px] lg:tw-min-w-[800px] tw-text-sm tw-table-auto">
               <thead class="tw-bg-gray-50 tw-border-b tw-border-gray-200 tw-sticky tw-top-0">
                 <tr>
-                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Lot #</th>
-                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[90px] md:tw-min-w-[120px]">Item Key</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Lot #</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[90px] md:tw-min-w-[120px]">Item Key</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[120px] md:tw-min-w-[200px]">Description</th>
-                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[60px] md:tw-min-w-[80px]">Location</th>
-                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[70px] md:tw-min-w-[100px]">Bin</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[60px] md:tw-min-w-[80px]">Location</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[70px] md:tw-min-w-[100px]">Bin</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-right tw-font-semibold tw-text-gray-700 tw-min-w-[90px] md:tw-min-w-[120px]">Qty Available</th>
-                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-left tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Lot Status</th>
+                  <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Lot Status</th>
                   <th class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-font-semibold tw-text-gray-700 tw-min-w-[80px] md:tw-min-w-[100px]">Action</th>
                 </tr>
               </thead>
               <tbody class="tw-divide-y tw-divide-gray-200">
-                <tr 
+                <tr
                   *ngFor="let lot of searchResults(); trackBy: trackByLotNo"
                   class="hover:tw-bg-gray-50 tw-transition-colors tw-duration-150">
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-font-medium tw-text-gray-900 tw-break-words tw-text-xs md:tw-text-sm">{{ lot.lot_no }}</td>
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-break-words tw-text-xs md:tw-text-sm">{{ lot.item_key }}</td>
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-xs md:tw-text-sm" [title]="lot.item_description">
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-font-medium tw-text-gray-900 tw-text-center tw-break-words tw-text-xs md:tw-text-sm">{{ lot.lot_no }}</td>
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-center tw-break-words tw-text-xs md:tw-text-sm">{{ lot.item_key }}</td>
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-left tw-text-xs md:tw-text-sm" [title]="lot.item_description">
                     <div class="tw-max-w-[100px] md:tw-max-w-[200px] tw-truncate">{{ lot.item_description }}</div>
                   </td>
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-xs md:tw-text-sm">{{ lot.location }}</td>
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-break-words tw-text-xs md:tw-text-sm">{{ lot.current_bin }}</td>
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-center tw-text-xs md:tw-text-sm">{{ lot.location }}</td>
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-center tw-break-words tw-text-xs md:tw-text-sm">{{ lot.current_bin }}</td>
                   <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-right tw-text-gray-700 tw-whitespace-nowrap tw-text-xs md:tw-text-sm">
                     {{ lot.qty_available.toFixed(3) }} {{ lot.uom }}
                   </td>
-                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-gray-700 tw-text-xs md:tw-text-sm">
+                  <td class="tw-px-2 md:tw-px-3 tw-py-3 tw-text-center tw-text-xs md:tw-text-sm">
                     <span class="tw-px-2 tw-py-1 tw-rounded tw-bg-amber-100 tw-text-amber-800 tw-font-medium tw-text-xs">
                       {{ lot.lot_status || 'N/A' }}
                     </span>
