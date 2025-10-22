@@ -1,6 +1,6 @@
 #!/bin/bash
 # Comprehensive Load Test - Multiple Scenarios
-# Tests: Bulk Picking (4 users) + Putaway (3 users) + Mixed (7 users peak)
+# Tests: Bulk Picking (4 users) + Putaway (3 users) + Mixed (7 users) + Peak Load (10 users)
 
 BASE_URL="http://localhost:4400/api"
 USERNAME="deachawat"
@@ -178,6 +178,22 @@ bulk_picking_user 4 5000025 850866 &
 putaway_user 5 &
 putaway_user 6 &
 putaway_user 7 &
+wait
+echo ""
+
+echo "=========================================================================="
+echo "SCENARIO D: PEAK LOAD TEST - 10 CONCURRENT USERS (6 Picking + 4 Putaway)"
+echo "=========================================================================="
+bulk_picking_user 1 5000008 850858 &
+bulk_picking_user 2 5000008 850863 &
+bulk_picking_user 3 5000008 850862 &
+bulk_picking_user 4 5000025 850866 &
+bulk_picking_user 5 5000008 850858 &
+bulk_picking_user 6 5000008 850863 &
+putaway_user 7 &
+putaway_user 8 &
+putaway_user 9 &
+putaway_user 10 &
 wait
 echo ""
 
