@@ -1074,14 +1074,17 @@ export class PutawayComponent implements AfterViewInit {
     const reportLines = [
       `Bin Transfer Report                    Date:${formattedDate}`,
       '======================================================================================',
-      'Doc No         Item Key          Location Remarks     Reference No  Result',
+      'Doc No         Item Key          Location Result',
       '======================================================================================',
-      `${padEnd(transactionDetails.document_no, 15)}${padEnd(lot.itemKey, 18)}${padEnd(lot.location, 9)}${padEnd(formValues.remarks || '', 12)}${padEnd(formValues.referenced || '', 14)}Success`,
+      `${padEnd(transactionDetails.document_no, 15)}${padEnd(lot.itemKey, 18)}${padEnd(lot.location, 9)}Success`,
       '======================================================================================',
       'Bins/Lots from where material is transferred:',
       'LotNo           BinFrom          BinTo           Qtyonhand    QtyTransfer  Status',
       '======================================================================================',
-      `${padEnd(transactionDetails.lot_no, 16)}${padEnd(transactionDetails.bin_from, 17)}${padEnd(transactionDetails.bin_to, 16)}${padStart(qtyOnHand, 12)} ${padStart(qtyTransfer, 11)}  ${padEnd(lotStatusDisplay, 11)}`
+      `${padEnd(transactionDetails.lot_no, 16)}${padEnd(transactionDetails.bin_from, 17)}${padEnd(transactionDetails.bin_to, 16)}${padStart(qtyOnHand, 12)} ${padStart(qtyTransfer, 11)}  ${padEnd(lotStatusDisplay, 11)}`,
+      '',
+      `Remarks: ${formValues.remarks || '-'}`,
+      `Reference No: ${formValues.referenced || '-'}`
     ];
 
     const reportContent = reportLines.join('\n');
