@@ -1627,6 +1627,7 @@ export class BulkPickingComponent implements AfterViewInit {
   isSearchingLot = signal(false);
   isSearchingBin = signal(false);
   isProcessing = signal(false);
+  isSubmittingPick = signal(false); // Prevents duplicate pick submissions
   
   // ItemKey search modal state signals
   showItemSearchModal = signal(false);
@@ -3049,7 +3050,13 @@ export class BulkPickingComponent implements AfterViewInit {
     const statusClass = this.getDataCellClass(pallet);
     const classes: {[key: string]: boolean} = {};
     classes[statusClass] = true;
-    classes['pallet-selected-cell'] = this.isActivePallet(pallet.row_num);
+
+    // Only apply light blue selection to incomplete pallets
+    // Completed pallets should always show green, even when active/selected
+    if (statusClass !== 'data-cell-completed') {
+      classes['pallet-selected-cell'] = this.isActivePallet(pallet.row_num);
+    }
+
     return classes;
   }
 
@@ -3184,7 +3191,10 @@ export class BulkPickingComponent implements AfterViewInit {
     
     // DEFENSIVE LOGGING: Log coordinates being sent to backend for debugging
     this.debug.debug('BulkPicking', `PICK CONFIRMATION: Using SELECTED PALLET coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
-    
+
+    // Prevent duplicate submissions by setting submission flag
+    this.isSubmittingPick.set(true);
+
     // Call pick confirmation API - runNumber and itemKey are already validated above
     this.confirmPickWithBackend({
       runNo: runNumber,
@@ -3204,43 +3214,58 @@ export class BulkPickingComponent implements AfterViewInit {
       next: (response) => {
         this.debug.info('BulkPicking', 'Pick confirmation successful:', response);
 
+        // Reset submission flag to allow next pick
+        this.isSubmittingPick.set(false);
+
         // RACE CONDITION FIX: Single atomic state refresh operation
         this.refreshAllStateAfterPick(pickData.pickedBulkQty, pickData.lotNo, pickData.binNo);
       },
       error: (error) => {
         console.error('Pick confirmation failed:', error);
-        
+
         // Handle different error types with appropriate responses
         const msg = error?.message || '';
-        
+
+        // NEW: Handle pallet completion errors (from duplicate submissions or race conditions)
+        if (msg.includes('Pallet Row') && msg.includes('is completed')) {
+          console.warn('🔄 Pallet completion detected - auto-recovering with fresh data...');
+          this.handlePalletCompletionError(pickData, error);
+          this.isSubmittingPick.set(false);
+        }
         // NEW: Handle transaction rollback errors (database is consistent, no refresh needed)
-        if (msg.includes('TRANSACTION_ROLLED_BACK')) {
+        else if (msg.includes('TRANSACTION_ROLLED_BACK')) {
           console.info('🔒 Transaction was safely rolled back - database is consistent, no refresh needed');
           this.errorMessage.set(this.formatUserFriendlyError(error));
+          this.isSubmittingPick.set(false);
           // Service automatically manages loading states - no manual intervention needed
         }
         // CRITICAL: Handle complete transaction failure (requires IT support)
         else if (msg.includes('TRANSACTION_FAILED') && msg.includes('ROLLBACK_ALSO_FAILED')) {
           console.error('🚨 CRITICAL: Transaction failed AND rollback failed - database may be inconsistent!');
           this.errorMessage.set(this.formatUserFriendlyError(error));
+          this.isSubmittingPick.set(false);
           // Don't attempt any automatic recovery for critical failures
         }
         // Handle batch completion errors with auto-refresh (legacy behavior)
         else if (msg.includes('BATCH_ALREADY_COMPLETED') || msg.includes('This batch is already completed')) {
           console.warn('🔄 Batch already completed - loading next unpicked batch automatically...');
           this.handleBatchCompletionError(pickData, error);
+          this.isSubmittingPick.set(false);
         }
         // Handle pallet advancement validation errors (enhanced for systematic fixes)
         else if (msg.includes('Qty Required 0') || msg.includes('ToPickedBulkQty=0') || msg.includes('data synchronization issue')) {
           console.warn('🔄 Pallet advancement validation error - attempting intelligent recovery...');
           this.handlePalletAdvancementError(pickData, error);
+          this.isSubmittingPick.set(false);
         }
-        // Handle other synchronization issues
+        // Handle other synchronization issues - WILL RETRY, so don't reset flag here
         else if (msg.includes('DATABASE_RECORD_NOT_FOUND')) {
           console.warn('🔄 Database record synchronization issue detected - attempting to refresh and retry...');
           this.handleDataSyncError(pickData, error);
+          // Note: Flag will be reset in handleDataSyncError's retry handlers
         } else {
           this.errorMessage.set(this.formatUserFriendlyError(error));
+          this.isSubmittingPick.set(false);
         }
       }
     });
@@ -3400,14 +3425,15 @@ export class BulkPickingComponent implements AfterViewInit {
   private handleDataSyncError(pickData: any, originalError: any): void {
     const runNumber = this.productionForm.get('runNumber')?.value;
     const currentIngredient = this.productionForm.get('itemKey')?.value;
-    
+
     if (!runNumber || !currentIngredient) {
       this.errorMessage.set('Data synchronization failed - missing run or ingredient information');
+      this.isSubmittingPick.set(false);
       return;
     }
-    
+
     this.debug.stateChange('BulkPicking', 'Refreshing data and retrying pick confirmation...');
-    
+
     // Refresh form data and retry once
     this.bulkRunsService.loadIngredientByItemKey(parseInt(runNumber, 10), currentIngredient).subscribe({
       next: (response) => {
@@ -3415,17 +3441,19 @@ export class BulkPickingComponent implements AfterViewInit {
           this.debug.info('BulkPicking', 'Data refreshed, retrying pick confirmation...');
           this.currentFormData.set(response.data);
           this.populateForm(response.data);
-          
+
           // Retry pick confirmation once
           this.bulkRunsService.confirmPick(pickData).subscribe({
             next: (retryResponse) => {
               this.debug.info('BulkPicking', 'Retry successful', retryResponse);
+              this.isSubmittingPick.set(false);
               // Use atomic refresh instead of multiple separate operations
               this.refreshAllStateAfterPick(pickData.pickedBulkQty, pickData.lotNo, pickData.binNo);
             },
             error: (retryError) => {
               console.error('❌ Retry failed:', retryError);
               this.errorMessage.set(`Pick confirmation failed after data refresh: ${this.formatUserFriendlyError(retryError)}`);
+              this.isSubmittingPick.set(false);
             }
           });
         }
@@ -3433,10 +3461,68 @@ export class BulkPickingComponent implements AfterViewInit {
       error: (refreshError) => {
         console.error('❌ Data refresh failed:', refreshError);
         this.errorMessage.set(`Data synchronization failed: ${this.formatUserFriendlyError(originalError)}`);
+        this.isSubmittingPick.set(false);
       }
     });
   }
-  
+
+  // Handle pallet completion errors caused by duplicate submissions or race conditions
+  private handlePalletCompletionError(pickData: any, originalError: any): void {
+    const runNumber = this.productionForm.get('runNumber')?.value;
+    const currentIngredient = this.productionForm.get('itemKey')?.value;
+
+    if (!runNumber || !currentIngredient) {
+      this.errorMessage.set('Pallet completion error - missing run or ingredient information');
+      return;
+    }
+
+    this.debug.info('BulkPicking', 'Pallet completion detected - refreshing data and auto-advancing to next pallet...');
+
+    // Show user-friendly message
+    this.errorMessage.set('Selected pallet is completed. Loading next available pallet...');
+
+    // Refresh ingredient data to get latest pallet information
+    this.bulkRunsService.loadIngredientByItemKey(parseInt(runNumber, 10), currentIngredient).subscribe({
+      next: (response) => {
+        if (response.success && response.data) {
+          // Update form with fresh data
+          this.currentFormData.set(response.data);
+          const freshData = response.data;
+
+          // Refresh pallet data
+          this.loadPalletTrackingDataObservable(runNumber, currentIngredient).subscribe({
+            next: () => {
+              // Auto-advance to next incomplete pallet
+              const nextIncompletePallet = this.getActivePallet();
+              if (nextIncompletePallet) {
+                this.selectedPalletRowNum.set(nextIncompletePallet.row_num);
+                this.debug.info('BulkPicking', `Auto-advanced to pallet ${nextIncompletePallet.batch_number} (RowNum: ${nextIncompletePallet.row_num})`);
+                this.errorMessage.set(null);
+
+                // Populate form with updated data
+                this.populateForm(freshData);
+              } else {
+                // No more pallets available
+                this.debug.warn('BulkPicking', `No more incomplete pallets available for ingredient ${currentIngredient}`);
+                this.errorMessage.set('All pallets for this ingredient are completed. Please select another ingredient.');
+              }
+            },
+            error: (palletError) => {
+              console.error('❌ Failed to refresh pallet data:', palletError);
+              this.errorMessage.set('Failed to refresh pallet data. Please try again.');
+            }
+          });
+        } else {
+          this.errorMessage.set('Failed to refresh ingredient data. Please try again.');
+        }
+      },
+      error: (refreshError) => {
+        console.error('❌ Failed to refresh ingredient data:', refreshError);
+        this.errorMessage.set(`Failed to refresh data: ${this.formatUserFriendlyError(refreshError)}`);
+      }
+    });
+  }
+
   // Format user-friendly error messages
   private formatUserFriendlyError(error: any): string {
     const message = (error && error.message) ? error.message : error?.toString?.() || '';
@@ -4801,6 +4887,11 @@ export class BulkPickingComponent implements AfterViewInit {
   isPickConfirmationReady(): boolean {
     // Check if ingredient is already completed - block confirmation for completed ingredients
     if (this.isCurrentIngredientCompleted()) {
+      return false;
+    }
+
+    // Prevent duplicate submissions - block if a pick operation is already in progress
+    if (this.isSubmittingPick()) {
       return false;
     }
 
