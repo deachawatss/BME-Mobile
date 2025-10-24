@@ -88,6 +88,20 @@ interface ProductionRun {
       font-weight: 900 !important; /* Extra bold text - maximum visibility on touchscreens */
     }
 
+    /* Pallet Selection Highlighting - Light Blue Data Cells Only */
+    .pallet-selected-header {
+      /* Keep original brown background and white text - no color changes for header */
+      border-right: 1px solid rgba(255, 255, 255, 0.2) !important; /* Maintain original border style */
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important; /* Maintain original border style */
+    }
+
+    .pallet-selected-cell {
+      background-color: #DBEAFE !important; /* Light blue - distinct from all status colors */
+      border-right: 1px solid rgba(30, 64, 175, 0.2) !important; /* Blue-tinted border for selected cells */
+      border-bottom: 1px solid rgba(30, 64, 175, 0.2) !important; /* Blue-tinted border for selected cells */
+      /* Text colors remain from status classes (gray/amber/green) */
+    }
+
     .coffee-table {
       border-radius: 12px;
       overflow: hidden;
@@ -688,8 +702,11 @@ interface ProductionRun {
                         <thead>
                           <tr>
                             <th class="coffee-header tw-min-w-[160px]"></th>
-                            <th *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId" 
-                                class="coffee-header tw-min-w-[100px]">
+                            <th *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId"
+                                class="coffee-header tw-min-w-[100px] tw-cursor-pointer tw-transition-colors"
+                                [ngClass]="{'pallet-selected-header': isActivePallet(pallet.row_num)}"
+                                (click)="selectPallet(pallet.row_num)"
+                                title="Click to select this pallet">
                               PALLET /{{ pallet.batch_number }}
                             </th>
                           </tr>
@@ -697,23 +714,27 @@ interface ProductionRun {
                         <tbody>
                           <tr class="cream-row">
                             <td class="table-cell label-cell">No. of Bags Picked</td>
-                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.no_of_bags_picked }}</td>
+                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.no_of_bags_picked }}</td>
                           </tr>
                           <tr class="latte-row">
                             <td class="table-cell label-cell">Quantity Picked</td>
-                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.quantity_picked | number:'1.4-4' }}</td>
+                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.quantity_picked | number:'1.4-4' }}</td>
                           </tr>
                           <tr class="cream-row">
                             <td class="table-cell label-cell">No. of Bags Remaining</td>
-                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.no_of_bags_remaining }}</td>
+                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.no_of_bags_remaining }}</td>
                           </tr>
                           <tr class="latte-row">
                             <td class="table-cell label-cell">Quantity Remaining</td>
-                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.quantity_remaining | number:'1.4-4' }}</td>
+                            <td *ngFor="let pallet of firstPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.quantity_remaining | number:'1.4-4' }}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -727,8 +748,11 @@ interface ProductionRun {
                         <thead>
                           <tr>
                             <th class="coffee-header tw-min-w-[160px]"></th>
-                            <th *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId" 
-                                class="coffee-header tw-min-w-[100px]">
+                            <th *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId"
+                                class="coffee-header tw-min-w-[100px] tw-cursor-pointer tw-transition-colors"
+                                [ngClass]="{'pallet-selected-header': isActivePallet(pallet.row_num)}"
+                                (click)="selectPallet(pallet.row_num)"
+                                title="Click to select this pallet">
                               PALLET# /{{ pallet.batch_number }}
                             </th>
                           </tr>
@@ -736,23 +760,27 @@ interface ProductionRun {
                         <tbody>
                           <tr class="cream-row">
                             <td class="table-cell label-cell">No. of Bags Picked</td>
-                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.no_of_bags_picked }}</td>
+                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.no_of_bags_picked }}</td>
                           </tr>
                           <tr class="latte-row">
                             <td class="table-cell label-cell">Quantity Picked</td>
-                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.quantity_picked | number:'1.4-4' }}</td>
+                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.quantity_picked | number:'1.4-4' }}</td>
                           </tr>
                           <tr class="cream-row">
                             <td class="table-cell label-cell">No. of Bags Remaining</td>
-                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.no_of_bags_remaining }}</td>
+                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.no_of_bags_remaining }}</td>
                           </tr>
                           <tr class="latte-row">
                             <td class="table-cell label-cell">Quantity Remaining</td>
-                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId" 
-                                class="table-cell" [ngClass]="getDataCellClass(pallet)">{{ pallet.quantity_remaining | number:'1.4-4' }}</td>
+                            <td *ngFor="let pallet of secondPalletGroup(); trackBy: trackByPalletId"
+                                class="table-cell"
+                                [ngClass]="getDataCellClasses(pallet)">{{ pallet.quantity_remaining | number:'1.4-4' }}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1708,6 +1736,9 @@ export class BulkPickingComponent implements AfterViewInit {
   isLoadingPalletData = signal(false);
   palletDataError = signal<string | null>(null);
 
+  // User-selected pallet for free pallet selection feature
+  selectedPalletRowNum = signal<number | null>(null);
+
   // Form definition
   productionForm: FormGroup;
 
@@ -2051,9 +2082,12 @@ export class BulkPickingComponent implements AfterViewInit {
   
   private populateForm(formData: BulkRunFormData): void {
     const fields = formData.form_data;
-    
+
     this.debug.debug('BulkPicking', `POPULATE FORM: Loading ingredient ${fields.item_key}, manual selection active: ${this.manualIngredientSelection()}`);
-    
+
+    // Reset pallet selection when switching ingredients (requirement: default to first incomplete)
+    this.resetPalletSelection();
+
     // Format decimal values to 4 decimal places
     const formatDecimal = (value: string | number): string => {
       const numValue = typeof value === 'string' ? parseFloat(value) : value;
@@ -2132,33 +2166,34 @@ export class BulkPickingComponent implements AfterViewInit {
   /**
    * Calculate remaining bags for CURRENT active pallet only (not total across all pallets)
    * This ensures "Remaining to Pick" header shows current pallet context, not run totals
+   * Now uses getActivePallet() to respect user's pallet selection
    */
   private calculateCurrentPalletRemaining(): string {
-    const palletData = this.palletData();
-    if (!palletData?.length) {
+    const activePallet = this.getActivePallet();
+
+    if (!activePallet) {
       // Fallback to backend total if no pallet data available
       const currentData = this.currentFormData();
       return currentData ? this.formatDecimal(currentData.form_data.remaining_bags) : '0.0000';
     }
 
-    // Find current active pallet (first pallet with remaining quantity > 0)
-    const activePallet = palletData.find(p => p.no_of_bags_remaining > 0);
-    return activePallet ? this.formatDecimal(activePallet.no_of_bags_remaining) : '0.0000';
+    return this.formatDecimal(activePallet.no_of_bags_remaining);
   }
 
   /**
    * Calculate remaining KG for CURRENT active pallet only (not total across all pallets)
    * Maintains consistency with bag calculation for current pallet context
+   * Now uses getActivePallet() to respect user's pallet selection
    */
   private calculateCurrentPalletRemainingKg(): string {
-    const palletData = this.palletData();
-    if (!palletData?.length) {
+    const activePallet = this.getActivePallet();
+
+    if (!activePallet) {
       const currentData = this.currentFormData();
       return currentData ? this.formatDecimal(currentData.form_data.remaining_kg) : '0.0000';
     }
 
-    const activePallet = palletData.find(p => p.no_of_bags_remaining > 0);
-    return activePallet ? this.formatDecimal(activePallet.quantity_remaining) : '0.0000';
+    return this.formatDecimal(activePallet.quantity_remaining);
   }
 
   /**
@@ -2178,6 +2213,89 @@ export class BulkPickingComponent implements AfterViewInit {
   private formatDecimal(value: string | number): string {
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
     return isNaN(numValue) ? '0.0000' : numValue.toFixed(4);
+  }
+
+  /**
+   * Get the currently active pallet for picking operations
+   * Returns user-selected pallet if available, otherwise defaults to first incomplete pallet
+   * This centralizes pallet selection logic for the free pallet selection feature
+   */
+  private getActivePallet(): PalletBatch | null {
+    const pallets = this.palletData();
+    if (!pallets || pallets.length === 0) return null;
+
+    // Sort pallets by batch_number ascending for consistent ordering
+    const sortedPallets = [...pallets].sort((a: any, b: any) => {
+      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
+      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
+      return aBatchNum - bBatchNum;
+    });
+
+    const selectedRowNum = this.selectedPalletRowNum();
+
+    // If user has selected a pallet, try to use it
+    if (selectedRowNum !== null) {
+      const selectedPallet = sortedPallets.find(p => p.row_num === selectedRowNum);
+
+      // Validate selected pallet still has remaining quantity
+      if (selectedPallet && parseFloat(selectedPallet.no_of_bags_remaining?.toString() || '0') > 0) {
+        return selectedPallet;
+      }
+
+      // Selected pallet is completed, auto-advance to next incomplete
+      this.debug.info('BulkPicking', `Selected pallet completed, auto-advancing to next incomplete pallet`);
+      const nextIncomplete = sortedPallets.find(p => parseFloat(p.no_of_bags_remaining?.toString() || '0') > 0);
+      if (nextIncomplete) {
+        this.selectedPalletRowNum.set(nextIncomplete.row_num);
+        return nextIncomplete;
+      }
+    }
+
+    // Default: return first incomplete pallet
+    const firstIncomplete = sortedPallets.find(p => parseFloat(p.no_of_bags_remaining?.toString() || '0') > 0);
+    if (firstIncomplete) {
+      return firstIncomplete;
+    }
+
+    // Fallback: return first pallet
+    return sortedPallets[0] || null;
+  }
+
+  /**
+   * Select a pallet for picking operations (user-initiated)
+   * Called when user clicks on a pallet header
+   */
+  selectPallet(rowNum: number): void {
+    const pallets = this.palletData();
+    const selectedPallet = pallets.find(p => p.row_num === rowNum);
+
+    if (!selectedPallet) {
+      this.debug.warn('BulkPicking', `Cannot select pallet: row_num ${rowNum} not found`);
+      return;
+    }
+
+    this.debug.info('BulkPicking', `User selected pallet: batch ${selectedPallet.batch_number}, row_num ${rowNum}`);
+    this.selectedPalletRowNum.set(rowNum);
+
+    // Update display values to reflect the newly selected pallet
+    this.updateRemainingDisplayValues();
+  }
+
+  /**
+   * Check if a pallet is currently active (for visual highlighting)
+   */
+  isActivePallet(rowNum: number): boolean {
+    const activePallet = this.getActivePallet();
+    return activePallet?.row_num === rowNum;
+  }
+
+  /**
+   * Reset pallet selection to default (first incomplete)
+   * Called when switching ingredients or loading new run data
+   */
+  private resetPalletSelection(): void {
+    this.debug.debug('BulkPicking', 'Resetting pallet selection to first incomplete');
+    this.selectedPalletRowNum.set(null);
   }
 
   // Story 1.2: Inventory management methods
@@ -2858,59 +2976,35 @@ export class BulkPickingComponent implements AfterViewInit {
     return true;
   }
   
-  // Get current batch data for validation (using real pallet data with sequential ordering)
+  // Get current batch data for validation (using active pallet selection logic)
   private getCurrentBatchData(): { toPickedBulkQty: number; pickedBulkQty: number; } | null {
     const currentFormData = this.currentFormData();
     if (!currentFormData?.current_ingredient?.ingredient) {
       console.warn('🔍 getCurrentBatchData: No current ingredient data available');
       return null;
     }
-    
-    const currentRowNum = currentFormData.current_ingredient.ingredient.row_num;
-    const pallets = this.palletData();
-    
-    this.debug.debug('BulkPicking', `getCurrentBatchData: Looking for pallet with RowNum ${currentRowNum} from ${pallets.length} pallets`);
-    
-    // Sort pallets by batch_number ascending to ensure sequential processing (850828→850829→850830...)
-    const sortedPallets = [...pallets].sort((a: any, b: any) => {
-      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
-      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
-      return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
-    });
-    
-    // CRITICAL FIX: Find the pallet that matches current form coordinates (RowNum)
-    // If not found, use the first incomplete pallet (fallback for timing issues)
-    let currentPallet = sortedPallets.find(p => parseInt(p.row_num?.toString() || '0') === currentRowNum);
-    
-    // Fallback: If exact match not found, find first incomplete pallet
-    if (!currentPallet || parseFloat(currentPallet.no_of_bags_remaining?.toString() || '0') <= 0) {
-      console.warn(`⚠️ Pallet RowNum ${currentRowNum} not found or completed, finding first incomplete pallet`);
-      currentPallet = sortedPallets.find(p => parseFloat(p.no_of_bags_remaining?.toString() || '0') > 0);
-    }
-    
-    // Ultimate fallback: Use first pallet
-    if (!currentPallet) {
-      currentPallet = sortedPallets[0];
-    }
-    
+
+    // Use getActivePallet() to respect user's pallet selection
+    const currentPallet = this.getActivePallet();
+
     if (currentPallet) {
       // Use actual pallet data
       const remainingBags = parseFloat(currentPallet.no_of_bags_remaining?.toString() || '0');
       const pickedBags = parseFloat(currentPallet.no_of_bags_picked?.toString() || '0');
-      
-      this.debug.debug('BulkPicking', `getCurrentBatchData: Using pallet ${currentPallet.batch_number} (RowNum: ${currentPallet.row_num}) for validation - ${remainingBags} remaining, ${pickedBags} picked`);
-      
+
+      this.debug.debug('BulkPicking', `getCurrentBatchData: Using active pallet ${currentPallet.batch_number} (RowNum: ${currentPallet.row_num}) for validation - ${remainingBags} remaining, ${pickedBags} picked`);
+
       return {
-        toPickedBulkQty: remainingBags + pickedBags, // Total capacity of this pallet  
+        toPickedBulkQty: remainingBags + pickedBags, // Total capacity of this pallet
         pickedBulkQty: pickedBags                     // How many bags already picked from this pallet
       };
     }
-    
+
     // Fallback to form data if pallet not found
-    console.warn(`🔍 getCurrentBatchData: Pallet not found for RowNum ${currentRowNum}, using form data fallback`);
+    console.warn('🔍 getCurrentBatchData: No active pallet found, using form data fallback');
     const remainingBags = parseFloat(currentFormData.form_data.remaining_bags || '0');
     const pickedBags = 0; // Cannot determine picked quantity from form data
-    
+
     return {
       toPickedBulkQty: remainingBags,
       pickedBulkQty: pickedBags
@@ -2937,10 +3031,10 @@ export class BulkPickingComponent implements AfterViewInit {
     if (!pallet || !pallet.hasOwnProperty('no_of_bags_remaining') || !pallet.hasOwnProperty('no_of_bags_picked')) {
       return 'data-cell-unpicked';  // Default for invalid data
     }
-    
+
     const remainingBags = parseFloat(pallet.no_of_bags_remaining?.toString() || '0');
     const pickedBags = parseFloat(pallet.no_of_bags_picked?.toString() || '0');
-    
+
     if (remainingBags === 0 && pickedBags > 0) {
       return 'data-cell-completed';    // Light green for completed batches
     } else if (pickedBags > 0 && remainingBags > 0) {
@@ -2949,7 +3043,16 @@ export class BulkPickingComponent implements AfterViewInit {
       return 'data-cell-unpicked';     // Light brown for unpicked batches
     }
   }
-  
+
+  // Get merged class object for data cells including selection highlighting
+  getDataCellClasses(pallet: any): {[key: string]: boolean} {
+    const statusClass = this.getDataCellClass(pallet);
+    const classes: {[key: string]: boolean} = {};
+    classes[statusClass] = true;
+    classes['pallet-selected-cell'] = this.isActivePallet(pallet.row_num);
+    return classes;
+  }
+
   private calculateRemainingQuantities(): void {
     // UNIFIED STATE MANAGEMENT: Use same data source as completion logic
     // This prevents state conflicts between display and completion calculations
@@ -3059,35 +3162,18 @@ export class BulkPickingComponent implements AfterViewInit {
     }
     
     const lineId = currentData.current_ingredient.ingredient.line_id;
-    
-    // CRITICAL FIX: Find the FIRST AVAILABLE pallet (one with remaining quantity > 0)
-    // We need to use the first pallet that still needs picking, not the current ingredient's RowNum
-    const pallets = this.palletData();
-    if (!pallets || pallets.length === 0) {
-      this.errorMessage.set('No pallet data available for pick operation');
+
+    // CRITICAL FIX: Use getActivePallet() to respect user's pallet selection
+    // This ensures pick operations go to the user-selected pallet, not always the first one
+    const activePallet = this.getActivePallet();
+
+    if (!activePallet) {
+      this.errorMessage.set('No active pallet available for pick operation');
       return;
     }
-    
-    // Sort pallets by batch_number ascending and find first one with remaining bags > 0
-    const sortedPallets = [...pallets].sort((a: any, b: any) => {
-      const aBatchNum = parseInt(a.batch_number?.toString() || '0');
-      const bBatchNum = parseInt(b.batch_number?.toString() || '0');
-      return aBatchNum - bBatchNum; // Ascending order for sequential processing by batch
-    });
-    
-    // Find the first pallet with remaining bags > 0
-    const availablePallet = sortedPallets.find(p => {
-      const remainingBags = parseInt(p.no_of_bags_remaining?.toString() || '0');
-      return remainingBags > 0;
-    });
-    
-    if (!availablePallet) {
-      this.errorMessage.set('No available pallets found for pick operation');
-      return;
-    }
-    
-    const rowNum = parseInt(availablePallet.row_num?.toString() || '0'); // Use FIRST AVAILABLE pallet's RowNum
-    const palletNumber = availablePallet.batch_number;
+
+    const rowNum = parseInt(activePallet.row_num?.toString() || '0');
+    const palletNumber = activePallet.batch_number;
     
     // DEFENSIVE VALIDATION: Ensure coordinates are valid before sending to backend
     if (!rowNum || !lineId || rowNum <= 0 || lineId <= 0) {
@@ -3097,7 +3183,7 @@ export class BulkPickingComponent implements AfterViewInit {
     }
     
     // DEFENSIVE LOGGING: Log coordinates being sent to backend for debugging
-    this.debug.debug('BulkPicking', `PICK CONFIRMATION: Using FIRST AVAILABLE coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
+    this.debug.debug('BulkPicking', `PICK CONFIRMATION: Using SELECTED PALLET coordinates - RowNum: ${rowNum} (Pallet: ${palletNumber}), LineId: ${lineId}, ItemKey: ${itemKey}, RunNo: ${runNumber}`);
     
     // Call pick confirmation API - runNumber and itemKey are already validated above
     this.confirmPickWithBackend({
@@ -3804,6 +3890,10 @@ export class BulkPickingComponent implements AfterViewInit {
       const currentFormRowNum = currentFormData.current_ingredient.ingredient.row_num;
       if (currentFormRowNum !== activePallet.row_num) {
         this.debug.stateChange('BulkPicking', `Advancing from completed pallets to next active pallet ${activePallet.batch_number} (RowNum: ${activePallet.row_num})`);
+
+        // Update user's pallet selection to follow auto-advancement
+        this.selectedPalletRowNum.set(activePallet.row_num);
+
         this.advanceToNextPallet(currentItemKey, activePallet.row_num, currentLineId);
       } else {
         this.debug.debug('BulkPicking', `Current pallet ${activePallet.batch_number} is already active with ${parseFloat(activePallet.no_of_bags_remaining?.toString() || '0')} bags remaining`);
