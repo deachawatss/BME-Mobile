@@ -707,7 +707,7 @@ interface ProductionRun {
                                 [ngClass]="{'pallet-selected-header': isActivePallet(pallet.row_num)}"
                                 (click)="selectPallet(pallet.row_num)"
                                 title="Click to select this pallet">
-                              PALLET /{{ pallet.batch_number }}
+                              {{ pallet.batch_number }}
                             </th>
                           </tr>
                         </thead>
@@ -753,7 +753,7 @@ interface ProductionRun {
                                 [ngClass]="{'pallet-selected-header': isActivePallet(pallet.row_num)}"
                                 (click)="selectPallet(pallet.row_num)"
                                 title="Click to select this pallet">
-                              PALLET# /{{ pallet.batch_number }}
+                              {{ pallet.batch_number }}
                             </th>
                           </tr>
                         </thead>
