@@ -31,56 +31,6 @@ pub enum AlertSeverity {
     Info,     // Informational only
 }
 
-/// Enhanced inventory status model
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventoryStatus {
-    pub item_key: String,
-    pub total_soh: BigDecimal,
-    pub available_qty: BigDecimal,
-    pub reserved_qty: BigDecimal,
-    pub uom: String,
-    pub status: StockStatus,
-    pub location_count: i32,
-    pub lot_count: i32,
-    pub alerts: Vec<InventoryAlert>,
-}
-
-/// Stock status enumeration
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum StockStatus {
-    Normal,
-    Low,
-    OutOfStock,
-    Expired,
-    Unknown,
-}
-
-/// UOM conversion information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UomConversion {
-    pub from_uom: String,
-    pub to_uom: String,
-    pub conversion_factor: BigDecimal,
-    pub is_exact: bool,
-}
-
-/// Inventory summary for reporting
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventorySummary {
-    pub item_key: String,
-    pub description: String,
-    pub current_stock: BigDecimal,
-    pub stock_uom: String,
-    pub bulk_pack_size: BigDecimal,
-    pub bulk_pack_uom: String,
-    pub total_locations: i32,
-    pub total_lots: i32,
-    pub earliest_expiry: Option<String>,
-    pub stock_value: Option<BigDecimal>,
-    pub last_received: Option<String>,
-    pub stock_status: StockStatus,
-}
-
 impl InventoryAlert {
     /// Create a critical out of stock alert
     /// Only available during test compilation

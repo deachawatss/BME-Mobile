@@ -58,13 +58,6 @@ pub struct BulkRunStatusResponse {
     pub last_modified: Option<DateTime<Utc>>,
 }
 
-/// API request model for bulk run search
-#[derive(Debug, Deserialize)]
-pub struct BulkRunSearchQuery {
-    #[allow(dead_code)]
-    pub query: String,
-}
-
 /// Inventory information for an ingredient
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InventoryInfo {
