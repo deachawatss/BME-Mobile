@@ -21,6 +21,24 @@ services:
     image: mobile-rust-app:latest
     container_name: mobile-rust-app
     restart: unless-stopped
+
+    # =======================================================================
+    # Production Resource Limits (Optimized for 24-core, 64GB server)
+    # =======================================================================
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'          # Limit to 4 CPU cores per container
+          memory: 2G           # Limit to 2GB RAM per container
+        reservations:
+          cpus: '2.0'          # Reserve minimum 2 cores
+          memory: 1G           # Reserve minimum 1GB
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
     ports:
       - "4400:4400"
     environment:
@@ -40,6 +58,9 @@ services:
       - DATABASE_NAME=${DATABASE_NAME:-TFCPILOT3}
       - DATABASE_USERNAME=${DATABASE_USERNAME:-dvl}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD:-Pr0gr@mm1ng}
+      - DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-40}
+      - DATABASE_MIN_CONNECTIONS=${DATABASE_MIN_CONNECTIONS:-10}
+      - DATABASE_CONNECTION_TIMEOUT_SECS=${DATABASE_CONNECTION_TIMEOUT_SECS:-10}
 
       # =======================================================================
       # LDAP/Authentication Configuration

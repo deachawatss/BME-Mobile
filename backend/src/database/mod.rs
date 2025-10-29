@@ -51,12 +51,28 @@ impl Database {
         info!("🔄 Initializing database with connection pooling");
 
         let config = Self::load_database_config()?;
-        let max_pool_size = 20u32;
-        let pool = Self::create_pool(&config).await?;
+
+        // Read connection pool configuration from environment variables
+        let max_pool_size = env::var("DATABASE_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20u32);
+
+        let min_pool_size = env::var("DATABASE_MIN_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5u32);
+
+        let connection_timeout = env::var("DATABASE_CONNECTION_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10u64);
+
+        let pool = Self::create_pool(&config, max_pool_size, min_pool_size, connection_timeout).await?;
 
         info!(
-            "✅ Connection pool initialized - Database: {}, Max connections: {}, Min idle: 5",
-            config.database, max_pool_size
+            "✅ Connection pool initialized - Database: {}, Max connections: {}, Min idle: {}",
+            config.database, max_pool_size, min_pool_size
         );
 
         Ok(Self { pool, config, max_pool_size })
@@ -86,8 +102,13 @@ impl Database {
         })
     }
 
-    /// Create connection pool
-    async fn create_pool(config: &DatabaseConfig) -> Result<Pool<ConnectionManager>> {
+    /// Create connection pool with configurable parameters
+    async fn create_pool(
+        config: &DatabaseConfig,
+        max_size: u32,
+        min_idle: u32,
+        connection_timeout_secs: u64,
+    ) -> Result<Pool<ConnectionManager>> {
         let mut tiberius_config = Config::new();
         tiberius_config.host(&config.server);
         tiberius_config.port(config.port);
@@ -98,11 +119,11 @@ impl Database {
 
         let manager = ConnectionManager::new(tiberius_config);
 
-        // Configure connection pool settings
+        // Configure connection pool settings (now using environment variables)
         let pool = Pool::builder()
-            .max_size(20)  // Max 20 connections (adjust based on SQL Server limits)
-            .min_idle(Some(5))  // Keep 5 connections warm
-            .connection_timeout(Duration::from_secs(10))  // Wait max 10s for connection
+            .max_size(max_size)  // Configurable max connections (default 20, production 40)
+            .min_idle(Some(min_idle))  // Configurable warm connections (default 5, production 10)
+            .connection_timeout(Duration::from_secs(connection_timeout_secs))  // Configurable timeout (default 10s)
             .idle_timeout(Some(Duration::from_secs(300)))  // Close idle connections after 5 minutes
             .max_lifetime(Some(Duration::from_secs(1800)))  // Recycle connections after 30 minutes
             .build(manager)
