@@ -23,16 +23,18 @@ services:
     restart: unless-stopped
 
     # =======================================================================
-    # Production Resource Limits (Optimized for 24-core, 64GB server)
+    # Production Resource Limits (Optimized for 50-100 concurrent users)
+    # NOTE: Requires WSL2 configuration - see DOCKER.md for .wslconfig setup
+    # Current WSL2: 4 cores, 7.8GB | Target: 20 cores, 48GB
     # =======================================================================
     deploy:
       resources:
         limits:
-          cpus: '4.0'          # Limit to 4 CPU cores per container
-          memory: 2G           # Limit to 2GB RAM per container
+          cpus: '4.0'          # Use all 4 WSL2 cores (increase after .wslconfig)
+          memory: 6G           # Use 6GB of 7.8GB available (increase after .wslconfig)
         reservations:
           cpus: '2.0'          # Reserve minimum 2 cores
-          memory: 1G           # Reserve minimum 1GB
+          memory: 3G           # Reserve minimum 3GB
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -58,8 +60,8 @@ services:
       - DATABASE_NAME=${DATABASE_NAME:-TFCPILOT3}
       - DATABASE_USERNAME=${DATABASE_USERNAME:-dvl}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD:-Pr0gr@mm1ng}
-      - DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-40}
-      - DATABASE_MIN_CONNECTIONS=${DATABASE_MIN_CONNECTIONS:-10}
+      - DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-80}
+      - DATABASE_MIN_CONNECTIONS=${DATABASE_MIN_CONNECTIONS:-20}
       - DATABASE_CONNECTION_TIMEOUT_SECS=${DATABASE_CONNECTION_TIMEOUT_SECS:-10}
 
       # =======================================================================

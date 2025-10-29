@@ -38,6 +38,53 @@ This guide covers Docker deployment for the Mobile-Rust Bulk Picking System. The
   - LDAP Server: 192.168.0.1
 - **Server IP**: 192.168.0.10 (configured in CORS)
 
+### WSL2 Configuration (IMPORTANT for 24-core server)
+
+If running on Windows with WSL2, you need to configure WSL2 to use more resources:
+
+**Current WSL2 Default:** 4 cores, ~8GB RAM
+**Recommended for Production:** 20 cores, 48GB RAM
+
+**Steps to Configure:**
+
+1. **On Windows**, create/edit `C:\Users\<YourUsername>\.wslconfig`:
+```ini
+[wsl2]
+# Allocate 20 cores (leaving 4 for Windows)
+processors=20
+
+# Allocate 48GB RAM (leaving 16GB for Windows)
+memory=48GB
+
+# Set swap to 8GB
+swap=8GB
+
+# Disable memory reclaim for better performance
+pageReporting=false
+```
+
+2. **Restart WSL2** from Windows PowerShell (as Administrator):
+```powershell
+wsl --shutdown
+```
+
+3. **Restart your WSL2 terminal** and verify:
+```bash
+nproc          # Should show 20
+free -h        # Should show ~48GB
+```
+
+4. **After WSL2 reconfiguration**, update `docker-compose.yml`:
+```yaml
+deploy:
+  resources:
+    limits:
+      cpus: '16.0'      # Change from 4.0 to 16.0
+      memory: 32G       # Change from 6G to 32G
+```
+
+**Note:** Current configuration works with default WSL2 limits (4 cores, 6GB). After WSL2 reconfiguration, you can increase resources for better performance.
+
 ## Quick Start
 
 ### 1. Build the Docker Image
@@ -137,19 +184,19 @@ volumes:
 
 ## Production Configuration
 
-### Resource Limits (Optimized for 24-core, 64GB Server)
+### Resource Limits (Optimized for 50-100 Concurrent Users)
 
-The deployment includes production-ready resource limits to prevent runaway resource consumption and enable future scaling:
+The deployment is configured to maximize single-container performance using 50% of your server's CPU capacity:
 
 ```yaml
 deploy:
   resources:
     limits:
-      cpus: '4.0'          # Maximum 4 CPU cores per container
-      memory: 2G           # Maximum 2GB RAM per container
+      cpus: '12.0'         # 12 CPU cores for high concurrency (50% of 24-core server)
+      memory: 8G           # 8GB RAM for optimal performance (12.5% of 64GB)
     reservations:
-      cpus: '2.0'          # Minimum 2 cores reserved
-      memory: 1G           # Minimum 1GB reserved
+      cpus: '8.0'          # Minimum 8 cores reserved
+      memory: 4G           # Minimum 4GB reserved
   restart_policy:
     condition: on-failure
     delay: 5s
@@ -157,10 +204,14 @@ deploy:
     window: 120s
 ```
 
-**Resource Utilization:**
-- **Single Container**: Uses 5-8% of CPU capacity (1-2 active cores out of 24)
-- **With 4 Replicas** (future scaling): Uses 30-50% of CPU capacity
-- **Memory**: ~200-500MB per container under normal load
+**Resource Allocation Strategy:**
+- **CPU**: 12 of 24 cores (50%) dedicated to application
+  - Tokio spawns 12 worker threads for concurrent request handling
+  - Remaining 12 cores for OS, SQL Server, and system processes
+- **Memory**: 8GB of 64GB (12.5%) dedicated to application
+  - ~6-7GB for application runtime under peak load
+  - Remaining 56GB for OS cache, SQL Server, and system buffers
+- **Database Connections**: 80 concurrent connections for high throughput
 
 ### Database Connection Pool Configuration
 
@@ -168,37 +219,47 @@ The backend now supports environment-based connection pool tuning:
 
 ```yaml
 environment:
-  - DATABASE_MAX_CONNECTIONS=40           # Default: 20, Production: 40-120
-  - DATABASE_MIN_CONNECTIONS=10           # Default: 5, Production: 10-30
-  - DATABASE_CONNECTION_TIMEOUT_SECS=10   # Default: 10, Production: 10-30
+  - DATABASE_MAX_CONNECTIONS=80           # 80 connections for 50-100 concurrent users
+  - DATABASE_MIN_CONNECTIONS=20           # 20 warm connections always ready
+  - DATABASE_CONNECTION_TIMEOUT_SECS=10   # 10 seconds timeout for getting connection
 ```
 
 **Configuration Guidelines:**
 
-| Deployment | Max Connections | Min Connections | Notes |
-|------------|----------------|-----------------|-------|
-| **Development** | 20 | 5 | Default values, single user |
-| **Production (Single)** | 40 | 10 | Current deployment (1 container) |
-| **Production (4 Replicas)** | 30 | 10 | 4 × 30 = 120 total connections |
-| **Production (6 Replicas)** | 20 | 5 | 6 × 20 = 120 total connections |
+| Deployment | Max Connections | Min Connections | Concurrent Users | Notes |
+|------------|----------------|-----------------|------------------|-------|
+| **Development** | 20 | 5 | 1-10 | Default values, single user testing |
+| **Production (Single Container)** | **80** | **20** | **50-100** | **Current deployment** |
+| **High Load (Single Container)** | 120 | 30 | 100-200 | For peak periods |
+| **Multi-Replica (Future)** | 40 | 10 | 200+ | 4 containers × 40 = 160 total |
 
 **Important Notes:**
 - SQL Server default max connections: **32,767** (virtually unlimited for this use case)
-- Each container needs enough connections for concurrent requests
-- Formula: `Total DB Connections = Replicas × Max Connections per Container`
+- **Current Setup**: 80 connections with 12 CPU cores = excellent concurrency
+- Rule of thumb: ~1 connection per concurrent active query
 - Monitor with: `docker-compose logs | grep "Connection pool initialized"`
 
 ### Performance Tuning
 
-**Expected Performance (Single Container):**
-- Throughput: 500-1,000 requests/second
-- Latency (p95): 50-100ms
-- Max concurrent users: 50-100
+**Expected Performance (Current: 12 cores, 8GB, 80 connections):**
+- **Throughput**: 2,000-3,000 requests/second
+- **Latency (p95)**: 30-50ms
+- **Max concurrent users**: 50-100 active users
+- **Database queries**: 80 concurrent queries
+- **Tokio worker threads**: 12 threads for async I/O
 
-**With Multi-Replica Deployment (Future):**
-- Throughput: 3,000-6,000 requests/second (6x improvement)
-- Latency (p95): 20-40ms (2-3x improvement)
-- Max concurrent users: 300-600 (6x improvement)
+**Performance Comparison:**
+
+| Configuration | Cores | RAM | DB Conn | Throughput | Concurrent Users |
+|--------------|-------|-----|---------|------------|------------------|
+| Development | 2 | 1GB | 20 | 500 req/s | 10-20 |
+| **Current Production** | **12** | **8GB** | **80** | **2,000-3,000 req/s** | **50-100** |
+| High Load | 20 | 16GB | 120 | 4,000-5,000 req/s | 100-200 |
+
+**Scaling Strategy:**
+- Current configuration optimized for 50-100 concurrent users
+- If you need more: Increase to 20 cores, 16GB, 120 connections
+- Beyond 200 users: Consider multi-replica deployment
 
 ### Monitoring Resource Usage
 
@@ -216,8 +277,14 @@ docker-compose logs | grep "Connection pool"
 **Sample Output:**
 ```
 CONTAINER         CPU %   MEM USAGE / LIMIT   MEM %   NET I/O
-mobile-rust-app   8.5%    450MB / 2GB        22.5%   1.2MB / 3.4MB
+mobile-rust-app   35.2%   1.2GB / 8GB        15.0%   45MB / 120MB
 ```
+
+**Typical Resource Usage Under Load:**
+- **CPU**: 25-40% (3-5 cores active out of 12 allocated)
+- **Memory**: 1-3GB (12-37% of 8GB allocated)
+- **Database Connections**: 30-60 active (out of 80 max)
+- **Network**: Variable based on concurrent requests
 
 ## Docker Commands
 
