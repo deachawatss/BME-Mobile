@@ -18,23 +18,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        API_URL: http://192.168.0.11:4400/api
+        FRONTEND_HOST: 192.168.0.11
+        FRONTEND_PORT: 4400
     image: mobile-rust-app:latest
     container_name: mobile-rust-app
     restart: unless-stopped
 
     # =======================================================================
-    # Production Resource Limits (Optimized for 50-100 concurrent users)
-    # NOTE: Requires WSL2 configuration - see DOCKER.md for .wslconfig setup
-    # Current WSL2: 4 cores, 7.8GB | Target: 20 cores, 48GB
+    # Production Resource Limits (Ubuntu Server: 24 cores, 64GB RAM)
+    # Optimized for 50-100 concurrent users (33% server allocation)
     # =======================================================================
     deploy:
       resources:
         limits:
-          cpus: '4.0'          # Use all 4 WSL2 cores (increase after .wslconfig)
-          memory: 6G           # Use 6GB of 7.8GB available (increase after .wslconfig)
+          cpus: '8.0'          # Use 8 of 24 cores (33% allocation)
+          memory: 4G           # Use 4GB of 64GB available
         reservations:
-          cpus: '2.0'          # Reserve minimum 2 cores
-          memory: 3G           # Reserve minimum 3GB
+          cpus: '4.0'          # Reserve minimum 4 cores
+          memory: 2G           # Reserve minimum 2GB
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -74,14 +77,14 @@ services:
       # =======================================================================
       # JWT Configuration
       # =======================================================================
-      - JWT_SECRET=${JWT_SECRET:-CHANGE_THIS_IN_PRODUCTION_PLEASE}
+      - JWT_SECRET=${JWT_SECRET:-dk1vC++zOJABg2PXp5veTMM08l2RphhxmpN2nDgOfgJVC0DvneeXZl4lVYzEhYz4GN1SDlwOhckbQ6nrYPTmRg==}
       - JWT_DURATION_HOURS=${JWT_DURATION_HOURS:-168}
 
       # =======================================================================
       # CORS Configuration
       # =======================================================================
-      # Allow access from server IP and localhost
-      - CORS_ORIGINS=http://192.168.0.10:4400,http://localhost:4400
+      # Allow access from Ubuntu server IP (192.168.0.11) and localhost
+      - CORS_ORIGINS=http://192.168.0.11:4400,http://localhost:4400
 
       # =======================================================================
       # Application Info
@@ -115,9 +118,10 @@ services:
 # ============================================================================
 # Notes
 # ============================================================================
-# - Frontend accessible at: http://192.168.0.10:4400
-# - Backend API accessible at: http://192.168.0.10:4400/api
+# - Frontend accessible at: http://192.168.0.11:4400
+# - Backend API accessible at: http://192.168.0.11:4400/api
 # - Single port 4400 matches Windows start_server.bat deployment
 # - Rust backend (tower-http) serves static files from /app/frontend/dist/frontend/browser
 # - Database and LDAP are external services (not containerized)
 # - Login credentials (from CLAUDE.md): deachawat / Wind@password9937
+# - Ubuntu Server: 24 cores, 64GB RAM (8 cores / 4GB allocated to container)

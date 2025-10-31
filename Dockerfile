@@ -11,6 +11,24 @@
 # ============================================================================
 FROM node:20-alpine AS frontend-builder
 
+# Build arguments for frontend configuration (passed from docker-compose.yml)
+ARG API_URL=http://192.168.0.11:4400/api
+ARG FRONTEND_HOST=192.168.0.11
+ARG FRONTEND_PORT=4400
+
+# Set as environment variables for the build process
+# These will be picked up by src/environments/load-env.js
+ENV API_URL=${API_URL}
+ENV FRONTEND_HOST=${FRONTEND_HOST}
+ENV FRONTEND_PORT=${FRONTEND_PORT}
+ENV PRODUCTION=true
+# CSP Configuration for Content Security Policy
+ENV CSP_API_HOST=${FRONTEND_HOST}
+ENV CSP_API_PORT=${FRONTEND_PORT}
+ENV CSP_NETWORK_HOST=${FRONTEND_HOST}
+ENV CSP_NETWORK_PORT=${FRONTEND_PORT}
+ENV CSP_WS_PORT=4200
+
 # Set working directory
 WORKDIR /app/frontend
 
@@ -24,6 +42,7 @@ RUN npm ci --prefer-offline --no-audit
 COPY frontend/ ./
 
 # Build production bundle (CRITICAL: build:prod ensures icons are included)
+# load-env.js will use the environment variables set above
 RUN npm run build:prod
 
 # ============================================================================

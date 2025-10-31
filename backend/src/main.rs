@@ -647,9 +647,10 @@ async fn main() {
     // Determine static assets path at startup for better performance
     let static_assets_path = {
         let possible_paths = vec![
-            "../frontend/dist/frontend/browser",
-            "frontend/dist/frontend/browser",
-            "./frontend/dist/frontend/browser",
+            "/app/frontend/dist/frontend/browser",  // Docker container path (production)
+            "../frontend/dist/frontend/browser",    // Development relative path
+            "frontend/dist/frontend/browser",       // Alternative relative path
+            "./frontend/dist/frontend/browser",     // Current directory path
         ];
 
         let mut selected_path = possible_paths[0].to_string(); // Default fallback
@@ -746,18 +747,18 @@ async fn main() {
                 .layer(from_fn_with_state(state.clone(), jwt_auth_middleware))
                 .with_state(state.database.clone()),
         )
-        // Serve static files from Angular dist
-        .nest_service("/assets", ServeDir::new("../frontend/dist/frontend/browser/assets"))
+        // Serve static files from Angular dist (using detected path)
+        .nest_service("/assets", ServeDir::new(format!("{}/assets", state.static_assets_path)))
         .fallback(handle_spa_or_static)
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&format!("{host}:{port}"))
         .await
         .expect("Failed to bind to address");
 
     info!("🎯 Server started successfully on http://{}:{}", host, port);
-    info!("📁 Serving static files from ../frontend/dist/frontend/browser/");
+    info!("📁 Serving static files from {}", state.static_assets_path);
     info!("🔧 API endpoints available at http://{}:{}/api/", host, port);
     
     axum::serve(listener, app)
