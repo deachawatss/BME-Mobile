@@ -3,9 +3,9 @@
 
 export const environment = {
   production: true,
-  apiUrl: 'http://192.168.0.11:4400/api',
-  frontendHost: '192.168.0.11',
-  frontendPort: 4400,
+  apiUrl: 'http://localhost:4400/api',
+  frontendHost: '0.0.0.0',
+  frontendPort: 4200,
   enableDebug: false, // Always false in production
   enableMockData: false, // Always false in production
   enableInventoryAlerts: false

@@ -1137,4 +1137,42 @@ impl PutawayDatabase {
             Err(e) => Err(PutawayError::DatabaseError(e.to_string())),
         }
     }
+
+    /// Get all active putaway remarks for dropdown
+    pub async fn get_active_remarks(&self) -> Result<Vec<serde_json::Value>, PutawayError> {
+        let mut client = self
+            .db
+            .get_client()
+            .await
+            .map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
+
+        let query = r#"
+            SELECT id, remark_name
+            FROM dbo.putawaylist
+            WHERE is_active = 1
+            ORDER BY id
+        "#;
+
+        let result = client
+            .query(query, &[])
+            .await
+            .map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
+
+        let rows = result
+            .into_first_result()
+            .await
+            .map_err(|e| PutawayError::DatabaseError(e.to_string()))?;
+
+        let remarks: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<i32, _>("id").unwrap_or(0),
+                    "remark_name": row.get::<&str, _>("remark_name").unwrap_or("")
+                })
+            })
+            .collect();
+
+        Ok(remarks)
+    }
 }

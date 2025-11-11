@@ -23,6 +23,7 @@ pub fn create_putaway_routes() -> Router<Database> {
         .route("/bin/{location}/{bin_no}", get(validate_bin))
         .route("/transfer", post(execute_transfer))
         .route("/health", get(get_health))
+        .route("/remarks", get(get_remarks))
 }
 
 /// Search for lot details
@@ -312,4 +313,40 @@ async fn get_health(
     let service = PutawayService::new(database);
     Json(service.get_health().await)
 }
+
+/// Get all active putaway remarks for dropdown
+/// GET /api/putaway/remarks
+async fn get_remarks(
+    State(database): State<Database>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let service = PutawayService::new(database);
+
+    match service.get_active_remarks().await {
+        Ok(remarks) => Ok(Json(json!({
+            "success": true,
+            "data": remarks
+        }))),
+        Err(PutawayError::DatabaseError(msg)) => {
+            tracing::error!("Database error in get_remarks: {msg}");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Database error",
+                    "message": "Failed to retrieve remarks"
+                }))
+            ))
+        }
+        Err(e) => {
+            tracing::error!("Unexpected error in get_remarks: {e}");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Internal server error",
+                    "message": "An unexpected error occurred"
+                }))
+            ))
+        }
+    }
+}
+
 

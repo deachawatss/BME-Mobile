@@ -328,6 +328,13 @@ export class PutawayService {
   getPutawayHealth(): Observable<HealthResponse> {
     return this.http.get<HealthResponse>(`${this.baseUrl}/putaway/health`);
   }
+
+  /**
+   * Get all active putaway remarks for dropdown
+   */
+  getActiveRemarks(): Observable<{ success: boolean; data: { id: number; remark_name: string }[] }> {
+    return this.http.get<{ success: boolean; data: { id: number; remark_name: string }[] }>(`${this.baseUrl}/putaway/remarks`);
+  }
 }
 
 // ========================================================================================

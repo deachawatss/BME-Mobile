@@ -195,6 +195,11 @@ impl PutawayService {
         Ok(())
     }
 
+    /// Get all active putaway remarks for dropdown
+    pub async fn get_active_remarks(&self) -> Result<Vec<serde_json::Value>, PutawayError> {
+        self.db.get_active_remarks().await
+    }
+
     /// Search for bins with pagination
     ///
     /// When lot_no, item_key, and location are provided, the search will LEFT JOIN with LotMaster

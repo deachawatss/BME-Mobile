@@ -24,6 +24,11 @@ interface LotDetails {
   lotStatus: string;
 }
 
+interface RemarkOption {
+  id: number;
+  remark_name: string;
+}
+
 interface BinValidation {
   binNo: string;
   location: string;
@@ -258,12 +263,17 @@ interface PutawayRequest {
                   <!-- Remarks -->
                   <div class="tw-flex tw-flex-col tw-gap-2">
                     <label for="remarks" class="tw-text-sm tw-font-semibold tw-text-gray-700">Remarks (Optional)</label>
-                    <input
+                    <select
                       id="remarks"
-                      type="text"
                       formControlName="remarks"
-                      class="nwfth-input tw-w-full tw-px-3 tw-py-2 tw-text-sm"
-                    />
+                      class="nwfth-input tw-w-full tw-px-3 tw-py-2 tw-text-sm tw-bg-white tw-border tw-border-gray-300 tw-rounded-lg tw-focus:tw-ring-2 tw-focus:tw-ring-amber-500 tw-focus:tw-ring-offset-2 tw-focus:tw-border-amber-500">
+                      <option value="">Select a remark...</option>
+                      <option
+                        *ngFor="let remark of availableRemarks()"
+                        [value]="remark.remark_name">
+                        {{ remark.remark_name }}
+                      </option>
+                    </select>
                   </div>
 
                   <!-- Referenced -->
@@ -415,7 +425,8 @@ export class PutawayComponent implements AfterViewInit {
   initialSearchFilter = signal<string>('');
   isBinModalOpen = signal(false);
   initialBinSearchFilter = signal<string>('');
-  
+  availableRemarks = signal<RemarkOption[]>([]);
+
   // Simple success notification
   showSimpleSuccess = signal(false);
 
@@ -464,26 +475,29 @@ export class PutawayComponent implements AfterViewInit {
       binNumber: [{ value: '', disabled: true }],
       itemKey: [{ value: '', disabled: true }],
       location: [{ value: '', disabled: true }],
-      
+
       // Row 2: UOM (readonly), blank, QtyOnHand (readonly), Qty Avail (readonly)
       uom: [{ value: '', disabled: true }],
       qtyOnHand: [{ value: '', disabled: true }],
       qtyAvail: [{ value: '', disabled: true }],
-      
+
       // Row 3: Exp Date (readonly)
       expDate: [{ value: '', disabled: true }],
-      
+
       // Row 4: Putaway Qty (editable), Print Report (checkbox)
       putawayQty: ['', [Validators.required, Validators.min(0.001)]],
       printReport: [false],
-      
+
       // Row 5: To Bin # (editable)
       toBinNumber: ['', [Validators.required]],
-      
-      // Additional Information: Remarks and Referenced (optional)
+
+      // Additional Information: Remarks (dropdown) and Referenced (optional)
       remarks: [''],
       referenced: ['']
     });
+
+    // Load remarks for dropdown
+    this.loadRemarks();
 
     // Auto-search effect when lot number changes (disabled to prevent conflicts with manual search)
     // effect(() => {
@@ -492,6 +506,20 @@ export class PutawayComponent implements AfterViewInit {
     //     this.searchLot(lotNumber);
     //   }
     // });
+  }
+
+  // Load remarks for dropdown
+  private async loadRemarks() {
+    try {
+      const response = await this.putawayService.getActiveRemarks().toPromise();
+      if (response?.success) {
+        this.availableRemarks.set(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load remarks:', error);
+      // Continue with empty remarks if loading fails
+      this.availableRemarks.set([]);
+    }
   }
 
   ngAfterViewInit(): void {
