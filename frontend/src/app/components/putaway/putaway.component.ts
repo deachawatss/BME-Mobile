@@ -822,12 +822,10 @@ export class PutawayComponent implements AfterViewInit {
 
   // Search button handlers
   onSearchLot() {
-    const lotNumber = this.putawayForm.get('lotNumber')?.value?.trim();
+    // Always open with a blank filter for a fresh search, as requested by user
+    this.initialSearchFilter.set('');
     
-    // Set initial filter for the modal (empty string if no lot number entered)
-    this.initialSearchFilter.set(lotNumber || '');
-    
-    // Open lot selection modal with filter
+    // Open lot selection modal
     this.isLotModalOpen.set(true);
   }
 
@@ -838,12 +836,10 @@ export class PutawayComponent implements AfterViewInit {
   }
 
   onSearchToBin() {
-    const toBinNumber = this.putawayForm.get('toBinNumber')?.value?.trim();
+    // Always open with a blank filter for a fresh search
+    this.initialBinSearchFilter.set('');
     
-    // Set initial filter for the modal (empty string if no bin number entered)
-    this.initialBinSearchFilter.set(toBinNumber || '');
-    
-    // Open bin selection modal with filter
+    // Open bin selection modal
     this.isBinModalOpen.set(true);
   }
 
@@ -1028,7 +1024,7 @@ export class PutawayComponent implements AfterViewInit {
                 size: auto;
               }
               body {
-                font-family: 'Courier New', Courier, monospace;
+                font-family: 'Tahoma', 'Courier New', Courier, monospace;
                 font-size: 10pt;
                 line-height: 1.2;
                 margin: 0;
