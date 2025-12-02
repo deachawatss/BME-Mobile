@@ -4082,6 +4082,11 @@ impl Database {
             warn!("⚠️ BatchNo not found for run={}, row={}, line={}. PNITEM update will be skipped.", run_no, row_num, line_id);
         } else {
             info!("✅ Found BatchNo: {} for PNITEM update", batch_no);
+            
+            // Step 1a.1: Check Batch Status in PNMAST
+            // Prevent deletion if batch is already closed
+            self.check_batch_status(client, &batch_no).await
+                .context("Failed to check batch status")?;
         }
 
         // Step 1b: Get actual issued quantities from LotTransaction for rollback calculations
@@ -4541,6 +4546,13 @@ impl Database {
 
         info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, AllocLotQty: {} KG, PackSize: {} KG/bag",
               run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty, pack_size);
+
+        // Step 1a: Check Batch Status in PNMAST
+        // Prevent deletion if batch is already closed
+        if !batch_no.is_empty() {
+            self.check_batch_status(client, batch_no).await
+                .context("Failed to check batch status")?;
+        }
 
         // Step 2: Get specific LotTransaction record for the exact allocation being deleted
         // FIXED: Instead of SUM() which aggregates all records, get the specific record tied to this LotTranNo
@@ -5130,5 +5142,30 @@ impl Database {
                 total_ingredients: 0,
             })
         }
+    }
+
+    /// Check if a batch is closed in PNMAST
+    async fn check_batch_status(
+        &self,
+        client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,
+        batch_no: &str,
+    ) -> Result<(), anyhow::Error> {
+        let query = "SELECT Status FROM PNMAST WHERE BatchNo = @P1";
+        let mut stmt = tiberius::Query::new(query);
+        stmt.bind(batch_no);
+
+        let stream = stmt.query(client).await?;
+        let row = stream.into_row().await?;
+
+        if let Some(r) = row {
+            let status: &str = r.get("Status").unwrap_or("");
+            if status == "C" {
+                return Err(anyhow::anyhow!(
+                    "Cannot delete lot from batch {} because it is already closed",
+                    batch_no
+                ));
+            }
+        }
+        Ok(())
     }
 }
