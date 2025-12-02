@@ -875,7 +875,7 @@ impl Database {
               AND l.QtyOnHand > 0
               AND l.BinNo IS NOT NULL
               AND l.BinNo != ''
-              AND l.LotStatus IN ('P', 'B', 'C')  -- Include Production, Backup, and Current lots (exclude only Hold 'H' status)
+              AND (l.LotStatus IN ('P', 'C') OR l.LotStatus IS NULL OR l.LotStatus = '')  -- Include only P (Production), C (Current), NULL, or blank statuses
               AND (l.QtyOnHand - l.QtyCommitSales) >= bp.PackSize  -- Pack size validation (replaces hardcoded 25.0)
               AND b.Nettable = 1  -- Only nettable bins for bulk picking (excludes special purpose bins)
               AND (b.User4 IS NULL OR b.User4 != 'PARTIAL')  -- CRITICAL: Exclude PARTIAL bins (PWBF-04 fix)
@@ -1156,7 +1156,7 @@ impl Database {
             WHERE l.ItemKey = '{item_key}'
                 AND l.LocationKey = 'TFC1'
                 AND l.QtyOnHand > 0
-                AND (l.LotStatus != 'H' AND l.LotStatus != 'B' OR l.LotStatus IS NULL)  -- Exclude B (Blocked) and H (Hold) statuses
+                AND (l.LotStatus IN ('P', 'C') OR l.LotStatus IS NULL OR l.LotStatus = '')  -- Include only P (Production), C (Current), NULL, or blank statuses
                 AND (l.QtyOnHand - l.QtyCommitSales) > 0                    -- Available inventory only
                 AND l.QtyOnHand >= bp.PackSize                              -- PackSize minimum threshold validation
                 AND FLOOR((l.QtyOnHand - l.QtyCommitSales) / bp.PackSize) >= 1  -- Must have at least 1 available bag
