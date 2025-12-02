@@ -108,11 +108,11 @@ interface PutawayRequest {
                         class="nwfth-input tw-w-full tw-pr-14 tw-px-3 tw-py-2 tw-text-sm"
                         [class.tw-animate-pulse]="isSearching()"
                         [class.tw-border-blue-300]="isSearching()"
-                        (keydown.enter)="onSearchLot()"
+                        (keydown.enter)="onSearchLot($event)"
                       />
                       <button
                         type="button"
-                        (click)="onSearchLot()"
+                        (click)="onSearchLot(true)"
                         [disabled]="isSearching() || isProcessing()"
                         class="nwfth-button-primary tw-absolute tw-right-0 tw-inset-y-0 tw-w-12 tw-border-l tw-border-gray-300 tw-rounded-r-lg tw-flex tw-items-center tw-justify-center tw-text-white tw-text-sm hover:tw-bg-opacity-90 tw-transition-all tw-duration-200 tw-disabled:opacity-60"
                         aria-label="Search lot number">
@@ -244,11 +244,11 @@ interface PutawayRequest {
                       placeholder="Enter destination bin"
                       class="nwfth-input tw-w-full tw-pr-14 tw-px-3 tw-py-2 tw-text-sm"
                       (blur)="validateDestinationBin()"
-                      (keydown.enter)="onSearchToBin()"
+                      (keydown.enter)="onSearchToBin($event)"
                     />
                     <button 
                       type="button" 
-                      (click)="onSearchToBin()" 
+                      (click)="onSearchToBin(true)" 
                       [disabled]="isValidatingBin() || isProcessing()"
                       class="nwfth-button-primary tw-absolute tw-right-0 tw-inset-y-0 tw-w-12 tw-border-l tw-border-gray-300 tw-rounded-r-lg tw-flex tw-items-center tw-justify-center tw-text-white tw-text-sm hover:tw-bg-opacity-90 tw-transition-all tw-duration-200 tw-disabled:opacity-60" 
                       aria-label="Search destination bin">
@@ -445,9 +445,9 @@ export class PutawayComponent implements AfterViewInit {
     // Simplified validation - only check essential fields
     // toBinNumber will be validated at submit time to avoid Angular computed signal reactivity issues
     return lot !== null &&
-           putawayQtyValid &&
-           putawayQtyValue > 0 &&
-           putawayQtyValue <= maxQty;
+      putawayQtyValid &&
+      putawayQtyValue > 0 &&
+      putawayQtyValue <= maxQty;
   });
 
   // Lot context for bin selection modal (shows lot status in bins that contain this lot)
@@ -540,7 +540,7 @@ export class PutawayComponent implements AfterViewInit {
 
     try {
       const lotDetails = await this.putawayService.searchLot(lotNumber).toPromise();
-      
+
       if (lotDetails) {
         this.selectedLot.set({
           lotNumber: lotDetails.lot_no,
@@ -553,7 +553,7 @@ export class PutawayComponent implements AfterViewInit {
           expDate: lotDetails.expiry_date || '',
           lotStatus: lotDetails.lot_status || ''
         });
-        
+
         this.populateReadonlyFields(this.selectedLot()!);
       } else {
         this.setError(`Lot '${lotNumber}' not found`, 'lot', { lot_no: lotNumber });
@@ -583,7 +583,7 @@ export class PutawayComponent implements AfterViewInit {
       qtyAvail: lot.qtyAvail.toString(),
       expDate: lot.expDate
     }, { emitEvent: false });
-    
+
     // Update the editable putaway quantity field with precision-safe rounding
     // Fix for decimal precision issues: round to 3 decimal places to prevent floating-point errors
     const precisionSafeQuantity = this.roundToDecimalPlaces(lot.qtyAvail, 3);
@@ -609,7 +609,7 @@ export class PutawayComponent implements AfterViewInit {
 
     try {
       const validation = await this.putawayService.validateBin(location, toBin).toPromise();
-      
+
       if (!validation?.is_valid) {
         this.setError(`Invalid destination bin: ${validation?.message || 'Bin not found'}`, 'bin', {
           bin_no: toBin,
@@ -681,11 +681,11 @@ export class PutawayComponent implements AfterViewInit {
       // Step 3: Execute database transaction
       await this.updateProgress(50, 'Executing database transaction...');
       const result = await this.putawayService.executeBinTransfer(request).toPromise();
-      
+
       // Step 4: Process result
       await this.updateProgress(75, 'Processing transfer result...');
       await this.delay(200);
-      
+
       if (result?.success) {
         // Step 5: Finalize
         await this.updateProgress(90, 'Finalizing transfer...');
@@ -713,21 +713,21 @@ export class PutawayComponent implements AfterViewInit {
           source_lot_status: result.source_lot_status,
           destination_lot_status: result.destination_lot_status
         };
-        
+
         // Step 6: Complete
         await this.updateProgress(100, 'Transfer completed successfully!');
         await this.delay(300);
-        
+
         // Set simple success message and clear form immediately
         this.successMessage.set('Transfer Successful');
         this.showSimpleSuccess.set(true);
-        
+
         // Auto-print if print report was selected
         if (formValues.printReport) {
           // Print with current form data before clearing
           this.printTransferReceipt(transactionDetails, lot, formValues);
         }
-        
+
         // Clear form immediately to prevent duplicate transfers
         setTimeout(() => {
           this.clearForm();
@@ -775,7 +775,7 @@ export class PutawayComponent implements AfterViewInit {
   private parseErrorResponse(error: any) {
     if (error?.error) {
       const errorResponse = error.error;
-      
+
       // Handle specific error types
       switch (errorResponse.error) {
         case 'Insufficient quantity':
@@ -784,29 +784,29 @@ export class PutawayComponent implements AfterViewInit {
             available: errorResponse.available
           });
           break;
-          
+
         case 'Invalid bin':
           this.setError(errorResponse.message, 'bin', {
             bin_no: errorResponse.bin_no || this.putawayForm.get('toBinNumber')?.value,
             location: errorResponse.location || this.selectedLot()?.location
           });
           break;
-          
+
         case 'Lot not found':
           this.setError(errorResponse.message, 'lot', {
             lot_no: errorResponse.lot_no || this.selectedLot()?.lotNumber
           });
           break;
-          
+
         case 'Validation error':
           this.setError(errorResponse.message, 'validation');
           break;
-          
+
         case 'Transaction error':
         case 'Database error':
           this.setError('System error occurred. Please try again or contact support.', 'system');
           break;
-          
+
         default:
           this.setError(errorResponse.message || 'An unexpected error occurred', 'general');
       }
@@ -821,12 +821,31 @@ export class PutawayComponent implements AfterViewInit {
   }
 
   // Search button handlers
-  onSearchLot() {
-    // Always open with a blank filter for a fresh search, as requested by user
-    this.initialSearchFilter.set('');
-    
-    // Open lot selection modal
-    this.isLotModalOpen.set(true);
+  onSearchLot(fromButton: boolean | Event = false) {
+    // Handle Event object if passed directly (legacy binding support)
+    if (fromButton instanceof Event) {
+      fromButton.preventDefault();
+      fromButton = false;
+    }
+
+    // If clicked from button, ALWAYS open modal with clear filter (Bulk Picking behavior)
+    if (fromButton === true) {
+      this.initialSearchFilter.set('');
+      this.isLotModalOpen.set(true);
+      return;
+    }
+
+    // Enter key behavior: Check if there's a value in the lot number input
+    const lotNumber = this.putawayForm.get('lotNumber')?.value;
+
+    if (lotNumber && lotNumber.trim().length > 0) {
+      // If value exists (e.g. from scan), search directly
+      this.searchLot(lotNumber);
+    } else {
+      // If empty, open lot selection modal with blank filter
+      this.initialSearchFilter.set('');
+      this.isLotModalOpen.set(true);
+    }
   }
 
 
@@ -835,12 +854,31 @@ export class PutawayComponent implements AfterViewInit {
     this.errorMessage.set('Item search dialog not yet implemented');
   }
 
-  onSearchToBin() {
-    // Always open with a blank filter for a fresh search
-    this.initialBinSearchFilter.set('');
-    
-    // Open bin selection modal
-    this.isBinModalOpen.set(true);
+  onSearchToBin(fromButton: boolean | Event = false) {
+    // Handle Event object if passed directly (legacy binding support)
+    if (fromButton instanceof Event) {
+      fromButton.preventDefault();
+      fromButton = false;
+    }
+
+    // If clicked from button, ALWAYS open modal with clear filter (Bulk Picking behavior)
+    if (fromButton === true) {
+      this.initialBinSearchFilter.set('');
+      this.isBinModalOpen.set(true);
+      return;
+    }
+
+    // Enter key behavior: Check if there's a value in the to bin input
+    const toBinNumber = this.putawayForm.get('toBinNumber')?.value;
+
+    if (toBinNumber && toBinNumber.trim().length > 0) {
+      // If value exists (e.g. from scan), validate directly
+      this.validateDestinationBin();
+    } else {
+      // If empty, open bin selection modal with blank filter
+      this.initialBinSearchFilter.set('');
+      this.isBinModalOpen.set(true);
+    }
   }
 
   // Modal event handlers
@@ -861,7 +899,7 @@ export class PutawayComponent implements AfterViewInit {
     // Set the selected lot and populate form
     this.selectedLot.set(lotDetails);
     this.populateReadonlyFields(lotDetails);
-    
+
     // Update the lot number input field
     this.putawayForm.patchValue({
       lotNumber: lotItem.lot_no
@@ -898,7 +936,7 @@ export class PutawayComponent implements AfterViewInit {
   // Format timestamp for display
   formatTimestamp(timestamp: string): string {
     if (!timestamp) return 'N/A';
-    
+
     try {
       const date = new Date(timestamp);
       return date.toLocaleString('en-US', {
@@ -918,7 +956,7 @@ export class PutawayComponent implements AfterViewInit {
   // Get error title based on error message content
   getErrorTitle(): string {
     const message = this.errorMessage().toLowerCase();
-    
+
     if (message.includes('insufficient') || message.includes('only')) {
       return '⚠️ Insufficient Quantity';
     } else if (message.includes('invalid') && message.includes('bin')) {
@@ -941,7 +979,7 @@ export class PutawayComponent implements AfterViewInit {
   // Get user guidance based on error type
   getErrorGuidance(): string {
     const message = this.errorMessage().toLowerCase();
-    
+
     if (message.includes('insufficient') || message.includes('only')) {
       return 'Reduce the transfer quantity to match available inventory or check if lot has been moved.';
     } else if (message.includes('invalid') && message.includes('bin')) {
@@ -1008,9 +1046,9 @@ export class PutawayComponent implements AfterViewInit {
     iframe.style.width = '1px';
     iframe.style.height = '1px';
     iframe.style.visibility = 'hidden';
-    
+
     document.body.appendChild(iframe);
-    
+
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
     if (iframeDoc) {
       iframeDoc.open();
@@ -1043,13 +1081,13 @@ export class PutawayComponent implements AfterViewInit {
         </html>
       `);
       iframeDoc.close();
-      
+
       // Wait for content to load then print
       setTimeout(() => {
         try {
           iframe.contentWindow?.focus();
           iframe.contentWindow?.print();
-          
+
           // Clean up iframe after printing
           setTimeout(() => {
             document.body.removeChild(iframe);
