@@ -4085,8 +4085,7 @@ impl Database {
             
             // Step 1a.1: Check Batch Status in PNMAST
             // Prevent deletion if batch is already closed
-            self.check_batch_status(client, &batch_no).await
-                .context("Failed to check batch status")?;
+            self.check_batch_status(client, &batch_no).await?;
         }
 
         // Step 1b: Get actual issued quantities from LotTransaction for rollback calculations
@@ -4550,8 +4549,7 @@ impl Database {
         // Step 1a: Check Batch Status in PNMAST
         // Prevent deletion if batch is already closed
         if !batch_no.is_empty() {
-            self.check_batch_status(client, batch_no).await
-                .context("Failed to check batch status")?;
+            self.check_batch_status(client, batch_no).await?;
         }
 
         // Step 2: Get specific LotTransaction record for the exact allocation being deleted

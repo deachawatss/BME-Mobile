@@ -736,6 +736,7 @@ async fn main() {
                 .route("/{run_no}/{row_num}/{line_id}/unpick", post(bulk_runs::unpick_ingredient))
                 .route("/{run_no}/unpick-all", post(bulk_runs::unpick_all_run_lots))
                 .route("/{run_no}/revert-status", post(bulk_runs::revert_run_status))
+                .route("/{run_no}/print-status", put(bulk_runs::update_print_status))
                 .route("/health", get(bulk_runs::bulk_runs_health))
                 .layer(from_fn_with_state(state.clone(), jwt_auth_middleware))
                 .with_state(state.database.clone()),

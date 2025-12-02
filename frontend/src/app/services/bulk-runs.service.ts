@@ -316,28 +316,28 @@ export class BulkRunsService {
   private http = inject(HttpClient);
   private authService = inject(AuthService);
   private readonly baseUrl = `${environment.apiUrl}/bulk-runs`;
-  
+
   /**
    * Get HTTP headers with authentication for API requests
    */
   private getAuthHeaders(): HttpHeaders {
     const currentUser = this.authService.getCurrentUser();
     const token = this.authService.getStoredToken();
-    
+
     let headers = new HttpHeaders({
       'Content-Type': 'application/json'
     });
-    
+
     // Add Authorization header if token exists
     if (token) {
       headers = headers.set('Authorization', `Bearer ${token}`);
     }
-    
+
     // Add user identification header
     if (currentUser?.username) {
       headers = headers.set('x-user-id', currentUser.username);
     }
-    
+
     return headers;
   }
 
@@ -446,7 +446,7 @@ export class BulkRunsService {
           return throwError(() => new Error(errorMsg));
         }),
         // Extract data from API response
-        tap(() => {}),
+        tap(() => { }),
         // Transform response
         catchError(error => {
           if (error.error?.success === false) {
@@ -497,10 +497,10 @@ export class BulkRunsService {
           if (!response.data) {
             // Distinguish between post-unpick scenarios and real errors
             const isPostUnpickScenario = response.message && (
-              response.message.includes('Form data retrieved') || 
+              response.message.includes('Form data retrieved') ||
               response.message.includes('run')
             );
-            
+
             if (isPostUnpickScenario) {
               // This is likely a post-unpick scenario where backend returns success but no data
               const errorMsg = 'No form data available - likely all lots have been unpicked';
@@ -667,7 +667,7 @@ export class BulkRunsService {
             const alerts = response.data;
             const criticalAlerts = alerts.filter(a => a.severity === 'Critical');
             const warningAlerts = alerts.filter(a => a.severity === 'Warning');
-            
+
             let stockStatus: InventoryStatus['stock_status'] = 'Normal';
             if (criticalAlerts.some(a => a.alert_type.includes('OutOfStock'))) {
               stockStatus = 'OutOfStock';
@@ -823,10 +823,10 @@ export class BulkRunsService {
   loadIngredientByItemKeyAndCoordinates(runNo: number, itemKey: string, rowNum: number, lineId: number): Observable<ApiResponse<BulkRunFormData>> {
     this.isLoading.set(true);
     this.errorMessage.set(null);
-    
+
     // Use the coordinate-specific endpoint to load exact pallet data
     const url = `${this.baseUrl}/${runNo}/ingredient-by-coordinates?item_key=${itemKey}&row_num=${rowNum}&line_id=${lineId}`;
-    
+
     return this.http.get<ApiResponse<BulkRunFormData>>(url).pipe(
       tap((response: ApiResponse<BulkRunFormData>) => {
         this.isLoading.set(false);
@@ -997,7 +997,7 @@ export class BulkRunsService {
    */
   formatDateForDisplay(dateString?: string): string {
     if (!dateString) return this.getCurrentDateString();
-    
+
     try {
       const date = new Date(dateString);
       const year = date.getFullYear();
@@ -1082,7 +1082,7 @@ export class BulkRunsService {
     const httpOptions = {
       headers: this.getAuthHeaders()
     };
-    
+
 
     return this.http.post<ApiResponse<any>>(url, requestBody, httpOptions)
       .pipe(
@@ -1317,6 +1317,26 @@ export class BulkRunsService {
         console.error(`❌ SERVICE: Error updating run ${runNo} status to PRINT:`, error);
         const errorMsg = error.error?.message || error.message || 'Failed to update run status';
         return throwError(() => new Error(errorMsg));
+      })
+    );
+  }
+
+  /**
+   * Update run status to PRINT (triggered when printing labels)
+   */
+  updatePrintStatus(runNo: number): Observable<ApiResponse<any>> {
+    return this.http.put<ApiResponse<any>>(`${this.baseUrl}/${runNo}/print-status`, {}, {
+      headers: this.getAuthHeaders()
+    }).pipe(
+      catchError(error => {
+        const errorMsg = error.error?.message || `Failed to update print status for run ${runNo}`;
+        console.warn(`⚠️ Failed to update print status: ${errorMsg}`);
+        // Return success anyway to not block the printing process
+        return of({
+          success: true,
+          message: 'Print status update skipped',
+          data: null
+        });
       })
     );
   }

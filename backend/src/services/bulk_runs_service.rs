@@ -941,4 +941,67 @@ impl BulkRunsService {
             new_status: "PRINT".to_string(),
         })
     }
+
+    /// Update run status to PRINT if current status is NEW
+    pub async fn update_print_status(
+        &self,
+        run_no: i32,
+        user_id: &str,
+    ) -> Result<StatusUpdateResult, anyhow::Error> {
+        use crate::models::bulk_runs::StatusUpdateResult;
+
+        info!("🔄 SERVICE: Checking print status update for run {} by user: {}", run_no, user_id);
+
+        // Get current status
+        let current_status_option = self.database
+            .get_bulk_run_status(run_no)
+            .await
+            .context("Failed to get current run status")?;
+
+        let current_status = match current_status_option {
+            Some(status) => status.status,
+            None => {
+                let error_msg = format!("Run {run_no} not found");
+                warn!("⚠️ SERVICE: {}", error_msg);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
+
+        // Only update if status is NEW
+        if current_status == "NEW" {
+            info!("Run {} status is NEW, updating to PRINT", run_no);
+            
+            // Truncate user_id to 8 chars to fit ModifiedBy column
+            let truncated_user_id = if user_id.len() > 8 {
+                &user_id[0..8]
+            } else {
+                user_id
+            };
+
+            let update_success = self.database
+                .update_bulk_run_status(run_no, "PRINT", truncated_user_id)
+                .await
+                .context("Failed to update run status to PRINT")?;
+
+            if !update_success {
+                let error_msg = format!("Failed to update run {run_no} status - no rows were updated");
+                warn!("⚠️ SERVICE: {}", error_msg);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+
+            info!("✅ SERVICE: Successfully updated run {} status from NEW to PRINT", run_no);
+
+            Ok(StatusUpdateResult {
+                old_status: current_status,
+                new_status: "PRINT".to_string(),
+            })
+        } else {
+            info!("Run {} status is {}, skipping update to PRINT", run_no, current_status);
+            
+            Ok(StatusUpdateResult {
+                old_status: current_status.clone(),
+                new_status: current_status,
+            })
+        }
+    }
 }

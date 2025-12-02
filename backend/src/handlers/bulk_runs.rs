@@ -1349,3 +1349,44 @@ pub async fn revert_run_status(
         }
     }
 }
+
+/// **NEW PRINT STATUS UPDATE ENDPOINT** - Update run status to PRINT
+/// Triggered when printing labels
+#[instrument(skip(database))]
+pub async fn update_print_status(
+    Path(run_no): Path<i32>,
+    State(database): State<Database>,
+    headers: HeaderMap,
+) -> Result<Json<ApiResponse<StatusUpdateResult>>, StatusCode> {
+    info!("🔄 PRINT_STATUS: Attempting to update run {} status to PRINT", run_no);
+
+    // Extract user information from headers
+    let user_id = headers.get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("SYSTEM");
+
+    info!("👤 PRINT_STATUS: User triggering print status update for run {}: {}", run_no, user_id);
+
+    let service = BulkRunsService::new(database);
+
+    // Update run status to PRINT if currently NEW
+    match service.update_print_status(run_no, user_id).await {
+        Ok(status_result) => {
+            info!("✅ PRINT_STATUS: Successfully processed print status update for run {}", run_no);
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(status_result),
+                message: format!("Run {run_no} print status update processed"),
+            }))
+        }
+        Err(e) => {
+            warn!("❌ PRINT_STATUS: Failed to update run {} status: {}", run_no, e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Failed to update run status: {e}"),
+            }))
+        }
+    }
+}
