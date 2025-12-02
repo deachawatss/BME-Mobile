@@ -434,7 +434,7 @@ export class PutawayComponent implements AfterViewInit {
   putawayForm: FormGroup;
 
   // Computed values
-  maxQuantity = computed(() => this.selectedLot()?.qtyAvail ?? 0);
+  maxQuantity = computed(() => this.roundToDecimalPlaces(this.selectedLot()?.qtyAvail ?? 0, 3));
   isFormValid = computed(() => {
     const lot = this.selectedLot();
     const form = this.putawayForm;
@@ -579,8 +579,8 @@ export class PutawayComponent implements AfterViewInit {
       itemKey: lot.itemKey,
       location: lot.location,
       uom: lot.uom,
-      qtyOnHand: lot.qtyOnHand.toString(),
-      qtyAvail: lot.qtyAvail.toString(),
+      qtyOnHand: this.roundToDecimalPlaces(lot.qtyOnHand, 3).toFixed(3),
+      qtyAvail: this.roundToDecimalPlaces(lot.qtyAvail, 3).toFixed(3),
       expDate: lot.expDate
     }, { emitEvent: false });
 
