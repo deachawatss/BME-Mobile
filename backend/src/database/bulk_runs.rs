@@ -2379,10 +2379,97 @@ impl Database {
         // **UNIFIED PATTERN**: All operations now use TFCPILOT3 directly
         info!("✅ All operations completed successfully on TFCPILOT3 primary database");
 
-        // **SMART COMPLETION**: Step 6 completion check - Only triggers when ALL item keys are completely picked
+        // **STEP 6: UPDATE PNITEM** - Update PNITEM table with picked quantities
+        // Logic mirrors execute_phase5_pnitem_update in transaction_service.rs
+        info!("🔄 DEBUG: STEP 6 - Updating PNITEM table");
+
+        // 1. Check current User11 status
+        let check_pnitem_query = r#"
+            SELECT User11
+            FROM PNITEM WITH (UPDLOCK, ROWLOCK)
+            WHERE BatchNo = @P1 AND Lineid = @P2
+        "#;
+
+        let mut check_stmt = TiberiusQuery::new(check_pnitem_query);
+        check_stmt.bind(batch_info.batch_no.clone());
+        check_stmt.bind(request.line_id);
+
+        let user11_value = match check_stmt.query(&mut client).await {
+            Ok(stream) => {
+                let rows: Vec<Row> = stream.into_first_result().await.unwrap_or_default();
+                if let Some(row) = rows.first() {
+                    row.get::<i32, _>(0)
+                } else {
+                    // Log warning but don't fail transaction if PNITEM record missing (legacy data support)
+                    warn!("⚠️ PNITEM record not found for BatchNo={}, LineId={}. Skipping PNITEM update.", 
+                          batch_info.batch_no, request.line_id);
+                    None
+                }
+            },
+            Err(e) => {
+                warn!("⚠️ Failed to check PNITEM User11: {}. Skipping PNITEM update.", e);
+                None
+            }
+        };
+
+        // 2. Conditional Update based on User11
+        // If User11 is NULL -> First Pick (Override values)
+        // If User11 is NOT NULL -> Subsequent Pick (Accumulate values)
+        
+        // Only proceed if we found the record (or if we want to be strict, we could fail here)
+        // For now, we'll assume if check failed/empty, we skip update to avoid breaking flow
+        
+        let pnitem_update_sql = if user11_value.is_none() {
+            // First time (User11 is NULL) -> Override values
+            info!("🆕 PNITEM: First pick detected (User11 is NULL) - Overriding values");
+            r#"
+            UPDATE PNITEM
+            SET
+                ActualQty = @P1,
+                AllocQty = @P1,
+                ActualQtyDispUom = @P1,
+                SerLotQty = @P1,
+                Status = 'A',
+                User11 = 1
+            WHERE BatchNo = @P2 AND Lineid = @P3
+            "#
+        } else {
+            // Subsequent times (User11 is NOT NULL) -> Accumulate values
+            info!("➕ PNITEM: Subsequent pick detected (User11={:?}) - Accumulating values", user11_value);
+            r#"
+            UPDATE PNITEM
+            SET
+                ActualQty = ActualQty + @P1,
+                AllocQty = AllocQty + @P1,
+                ActualQtyDispUom = ActualQtyDispUom + @P1,
+                SerLotQty = SerLotQty + @P1,
+                Status = 'A'
+            WHERE BatchNo = @P2 AND Lineid = @P3
+            "#
+        };
+
+        let mut pnitem_stmt = TiberiusQuery::new(pnitem_update_sql);
+        pnitem_stmt.bind(picked_qty_f64); // @P1 - Weight in KG
+        pnitem_stmt.bind(batch_info.batch_no.clone()); // @P2
+        pnitem_stmt.bind(request.line_id); // @P3
+
+        match pnitem_stmt.execute(&mut client).await {
+            Ok(_) => {
+                info!("✅ STEP_6_SUCCESS: PNITEM updated successfully");
+            },
+            Err(e) => {
+                // Log error but decide if it should be critical
+                // For consistency with transaction_service, this SHOULD be critical
+                let error_msg = format!("STEP 6 FAILED: PNITEM update failed - Database error: {e}");
+                error!("❌ STEP_6_ERROR: {}", error_msg);
+                return Err(anyhow::anyhow!("STEP_6_UPDATE_FAILED: {}", error_msg));
+            }
+        }
+
+        // **SMART COMPLETION**: Step 7 completion check - Only triggers when ALL item keys are completely picked
         // Status changes NEW → PRINT automatically only when the FINAL pick of the LAST ingredient is completed
         // This ensures status change happens once when truly all ingredients are done, not after each individual pick
-        info!("🔄 DEBUG: STEP 6 - Smart completion check: Verifying if ALL ingredients are now complete");
+        info!("🔄 DEBUG: STEP 7 - Smart completion check: Verifying if ALL ingredients are now complete");
         
         let completion_check_result = self.check_and_update_run_completion(
             &mut client,
@@ -2393,19 +2480,19 @@ impl Database {
         
         match completion_check_result {
             Ok(true) => {
-                info!("🎉 DEBUG: Step 6 SMART COMPLETION - Run {} status updated NEW → PRINT (ALL bulk ingredients now completely picked)", run_no);
+                info!("🎉 DEBUG: Step 7 SMART COMPLETION - Run {} status updated NEW → PRINT (ALL bulk ingredients now completely picked)", run_no);
             },
             Ok(false) => {
-                info!("📋 DEBUG: Step 6 - Run {} still has incomplete ingredients (Status remains NEW, more picking needed)", run_no);
+                info!("📋 DEBUG: Step 7 - Run {} still has incomplete ingredients (Status remains NEW, more picking needed)", run_no);
             },
             Err(e) => {
-                warn!("⚠️ DEBUG: Step 6 non-critical error - Smart completion check failed: {}. Pick operation succeeded but status not updated.", e);
+                warn!("⚠️ DEBUG: Step 7 non-critical error - Smart completion check failed: {}. Pick operation succeeded but status not updated.", e);
                 // Continue - this is not critical for the main pick operation
             }
         }
 
-            // **🎉 OPERATIONS COMPLETE** - All 6 steps completed successfully
-            info!("🎉 TRANSACTION_COMPLETE: All 6-step bulk picking operations completed successfully");
+            // **🎉 OPERATIONS COMPLETE** - All 7 steps completed successfully
+            info!("🎉 TRANSACTION_COMPLETE: All 7-step bulk picking operations completed successfully");
             info!("✅ ALL_STEPS_SUCCEEDED: Ready to commit transaction");
             info!("🔄 TRANSACTION_TIMESTAMP: Pick transaction completed at {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC"));
 
@@ -2424,7 +2511,7 @@ impl Database {
                 client.simple_query("COMMIT").await
                     .context("Failed to commit bulk picking transaction")?;
 
-                info!("✅ TRANSACTION_COMMITTED: All 6 steps permanently saved to database");
+                info!("✅ TRANSACTION_COMMITTED: All 7 steps permanently saved to database");
                 info!("🎯 SUCCESS: Bulk picking transaction completed atomically for run {}", run_no);
                 Ok(response)
             },
@@ -3935,11 +4022,11 @@ impl Database {
                 WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
             "#)
         } else {
-            // For batch unpick, check ALL allocation records for this ingredient (LineId) across all batches (RowNums)
+            // For batch unpick, check ALL allocation records for this specific batch (RowNum)
             format!(r#"
                 SELECT COUNT(*) as AllocationCount
                 FROM Cust_BulkLotPicked
-                WHERE RunNo = {run_no} AND LineId = {line_id}
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
             "#)
         };
 
@@ -3971,6 +4058,32 @@ impl Database {
             }));
         }
 
+        // Step 1a: Fetch BatchNo for PNITEM update
+        // We need BatchNo to update the PNITEM table later
+        let get_batch_no_query = format!(r#"
+            SELECT TOP 1 BatchNo
+            FROM cust_BulkPicked
+            WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
+        "#);
+
+        let batch_stream = client.simple_query(&get_batch_no_query).await
+            .context("Failed to get BatchNo")?;
+        
+        let batch_rows: Vec<Row> = batch_stream.into_first_result().await
+            .context("Failed to process BatchNo rows")?;
+
+        let batch_no = if let Some(row) = batch_rows.first() {
+            row.get::<&str, _>("BatchNo").unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+
+        if batch_no.is_empty() {
+            warn!("⚠️ BatchNo not found for run={}, row={}, line={}. PNITEM update will be skipped.", run_no, row_num, line_id);
+        } else {
+            info!("✅ Found BatchNo: {} for PNITEM update", batch_no);
+        }
+
         // Step 1b: Get actual issued quantities from LotTransaction for rollback calculations
         // Use direct LotTransaction query with batch number matching - collect LotTranNo values for cleanup
         let get_issued_quantities_query = if let Some(lot) = specific_lot {
@@ -3987,7 +4100,7 @@ impl Database {
                 GROUP BY lt.LotNo, lt.ItemKey, lt.BinNo
             "#)
         } else {
-            // For batch unpick, get ALL actual issued quantities for this ingredient (LineId) across all batches (RowNums)
+            // For batch unpick, get actual issued quantities for this specific batch (RowNum)
             format!(r#"
                 SELECT lt.LotNo, lt.ItemKey, lt.BinNo,
                        SUM(lt.QtyIssued) as ActualIssued,
@@ -3995,7 +4108,7 @@ impl Database {
                 FROM LotTransaction lt
                 WHERE EXISTS (
                     SELECT 1 FROM Cust_BulkLotPicked blp
-                    WHERE blp.RunNo = {run_no} AND blp.LineId = {line_id}
+                    WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
                     AND lt.IssueDocNo = blp.BatchNo
                 ) AND lt.TransactionType = 5 AND lt.User5 = 'Picking Customization'
                 GROUP BY lt.LotNo, lt.ItemKey, lt.BinNo
@@ -4077,12 +4190,12 @@ impl Database {
                 "#)
             }
         } else {
-            // For entire ingredient unpick, reset ALL batches of this ingredient
+            // For entire batch unpick, reset ONLY this specific batch
             format!(r#"
                 UPDATE cust_BulkPicked
                 SET PickedBulkQty = 0, PickedQty = 0,
                     ItemBatchStatus = NULL, PickingDate = NULL, ModifiedBy = NULL
-                WHERE RunNo = {run_no} AND LineId = {line_id}
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
             "#)
         };
 
@@ -4139,7 +4252,7 @@ impl Database {
                       AND LotTranNo IN ({lot_tran_nos_str})
                       AND EXISTS (
                           SELECT 1 FROM Cust_BulkLotPicked blp
-                          WHERE blp.RunNo = {run_no} AND blp.LineId = {line_id}
+                          WHERE blp.RunNo = {run_no} AND blp.RowNum = {row_num} AND blp.LineId = {line_id}
                           AND LotTransaction.IssueDocNo = blp.BatchNo
                       )
                 "#)
@@ -4161,10 +4274,10 @@ impl Database {
                 WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id} AND LotNo = '{lot}'
             "#)
         } else {
-            // For batch unpick, delete ALL allocations for this ingredient (LineId) across all batches (RowNums)
+            // For batch unpick, delete allocations for this specific batch (RowNum)
             format!(r#"
                 DELETE FROM Cust_BulkLotPicked
-                WHERE RunNo = {run_no} AND LineId = {line_id}
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
             "#)
         };
 
@@ -4179,16 +4292,61 @@ impl Database {
                 WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
             "#) // Note: no lot-specific filter in this table
         } else {
-            // For batch unpick, delete ALL pallet records for this ingredient (LineId) across all batches (RowNums)
+            // For batch unpick, delete pallet records for this specific batch (RowNum)
             format!(r#"
                 DELETE FROM Cust_BulkPalletLotPicked
-                WHERE RunNo = {run_no} AND LineId = {line_id}
+                WHERE RunNo = {run_no} AND RowNum = {row_num} AND LineId = {line_id}
             "#)
         };
 
         client.simple_query(&delete_pallet_query).await
             .context("Failed to delete pallet traceability records")?;
         info!("✅ Deleted pallet traceability records (Step 6)");
+
+        // Step 7: Revert PNITEM table quantities
+        // Logic mirrors Phase 6 in picking_service.rs and unpick_by_lot_tran_no
+        if total_qty_to_rollback > 0.0 && !batch_no.is_empty() {
+            info!("🔄 DEBUG: STEP 7 - Reverting PNITEM table quantities (Qty: {} KG)", total_qty_to_rollback);
+
+            let revert_pnitem_query = r#"
+                DECLARE @Remainder float;
+
+                -- Calculate remainder first (what the qty WOULD be after decrement)
+                SELECT @Remainder = ActualQty - @P1
+                FROM PNITEM WITH (UPDLOCK, ROWLOCK)
+                WHERE BatchNo = @P2 AND Lineid = @P3;
+
+                -- Apply updates based on Remainder
+                -- If Remainder <= 0.001 (Fully Unpicked), reset to StdQty and Status 'R'
+                -- Else (Partially Unpicked), set to Remainder and keep Status 'A'
+                UPDATE PNITEM
+                SET ActualQty = CASE WHEN @Remainder <= 0.001 THEN StdQty ELSE @Remainder END,
+                    AllocQty = CASE WHEN @Remainder <= 0.001 THEN 0 ELSE AllocQty - @P1 END,
+                    ActualQtyDispUom = CASE WHEN @Remainder <= 0.001 THEN StdQty ELSE @Remainder END,
+                    SerLotQty = CASE WHEN @Remainder <= 0.001 THEN 0 ELSE SerLotQty - @P1 END,
+                    Status = CASE WHEN @Remainder <= 0.001 THEN 'R' ELSE Status END,
+                    User11 = CASE WHEN @Remainder <= 0.001 THEN NULL ELSE User11 END
+                WHERE BatchNo = @P2 AND Lineid = @P3
+            "#;
+
+            let mut pnitem_stmt = TiberiusQuery::new(revert_pnitem_query);
+            pnitem_stmt.bind(total_qty_to_rollback); // @P1 - Quantity being removed (KG)
+            pnitem_stmt.bind(batch_no.as_str());     // @P2
+            pnitem_stmt.bind(line_id);               // @P3
+
+            match pnitem_stmt.execute(client).await {
+                Ok(_) => {
+                    info!("✅ STEP_7_SUCCESS: PNITEM reverted successfully");
+                },
+                Err(e) => {
+                    let error_msg = format!("STEP 7 FAILED: PNITEM revert failed - Database error: {e}");
+                    error!("❌ STEP_7_ERROR: {}", error_msg);
+                    return Err(anyhow::anyhow!("STEP_7_REVERT_FAILED: {}", error_msg));
+                }
+            }
+        } else {
+            info!("ℹ️ Skipping PNITEM revert (Qty: {}, BatchNo: '{}')", total_qty_to_rollback, batch_no);
+        }
 
         // Ensure transaction commit completion
         info!("🔄 Transaction completed for unpick operation - database state now consistent");
@@ -4379,7 +4537,7 @@ impl Database {
         let item_key: &str = row.get("ItemKey").unwrap_or("");
         let alloc_lot_qty: f64 = row.get("AllocLotQty").unwrap_or(0.0);
         let pack_size: f64 = row.get("PackSize").context("PackSize must be available from cust_BulkPicked table")?;
-        let _batch_no: &str = row.get("BatchNo").unwrap_or("");
+        let batch_no: &str = row.get("BatchNo").unwrap_or("");
 
         info!("✅ Found allocation record - Run: {}, Row: {}, Line: {}, Lot: {}, Bin: {}, Item: {}, AllocLotQty: {} KG, PackSize: {} KG/bag",
               run_no, row_num, line_id, lot_no, bin_no, item_key, alloc_lot_qty, pack_size);
@@ -4561,6 +4719,47 @@ impl Database {
             info!("✅ Deleted pallet traceability record (Step 7 - last allocation for ingredient)");
         } else {
             info!("ℹ️ Keeping pallet traceability record ({} allocations remaining)", remaining_count);
+        }
+
+        // **STEP 8: REVERT PNITEM** - Revert PNITEM table quantities
+        // Logic mirrors Phase 6 in picking_service.rs
+        info!("🔄 DEBUG: STEP 8 - Reverting PNITEM table quantities");
+
+        let revert_pnitem_query = r#"
+            DECLARE @Remainder float;
+
+            -- Calculate remainder first (what the qty WOULD be after decrement)
+            SELECT @Remainder = ActualQty - @P1
+            FROM PNITEM WITH (UPDLOCK, ROWLOCK)
+            WHERE BatchNo = @P2 AND Lineid = @P3;
+
+            -- Apply updates based on Remainder
+            -- If Remainder <= 0.001 (Fully Unpicked), reset to StdQty and Status 'R'
+            -- Else (Partially Unpicked), set to Remainder and keep Status 'A'
+            UPDATE PNITEM
+            SET ActualQty = CASE WHEN @Remainder <= 0.001 THEN StdQty ELSE @Remainder END,
+                AllocQty = CASE WHEN @Remainder <= 0.001 THEN 0 ELSE AllocQty - @P1 END,
+                ActualQtyDispUom = CASE WHEN @Remainder <= 0.001 THEN StdQty ELSE @Remainder END,
+                SerLotQty = CASE WHEN @Remainder <= 0.001 THEN 0 ELSE SerLotQty - @P1 END,
+                Status = CASE WHEN @Remainder <= 0.001 THEN 'R' ELSE Status END,
+                User11 = CASE WHEN @Remainder <= 0.001 THEN NULL ELSE User11 END
+            WHERE BatchNo = @P2 AND Lineid = @P3
+        "#;
+
+        let mut pnitem_stmt = TiberiusQuery::new(revert_pnitem_query);
+        pnitem_stmt.bind(alloc_lot_qty); // @P1 - Quantity being removed (KG)
+        pnitem_stmt.bind(batch_no);      // @P2
+        pnitem_stmt.bind(line_id);       // @P3
+
+        match pnitem_stmt.execute(client).await {
+            Ok(_) => {
+                info!("✅ STEP_8_SUCCESS: PNITEM reverted successfully (Qty: {} KG)", alloc_lot_qty);
+            },
+            Err(e) => {
+                let error_msg = format!("STEP 8 FAILED: PNITEM revert failed - Database error: {e}");
+                error!("❌ STEP_8_ERROR: {}", error_msg);
+                return Err(anyhow::anyhow!("STEP_8_REVERT_FAILED: {}", error_msg));
+            }
         }
 
 
