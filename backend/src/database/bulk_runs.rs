@@ -1781,17 +1781,20 @@ impl Database {
             
             // Validate picked quantity doesn't exceed remaining
             let requested_qty = self.safe_bigdecimal_to_f64(&request.picked_bulk_qty, "validation_picked_qty")?;
-            if requested_qty > remaining_for_validation {
+            // ROUNDING FIX: Use 3-decimal rounding to prevent floating-point precision issues
+            let requested_qty_rounded = self.round_to_3_decimals(requested_qty);
+            let remaining_rounded = self.round_to_3_decimals(remaining_for_validation);
+            if self.qty_greater_than(requested_qty_rounded, remaining_rounded) {
                 let error_msg = format!(
                     "Cannot pick {} bags. Only {} bags remaining in this batch (ItemKey: {}, Batch: RowNum={}, LineId={})",
-                    requested_qty, remaining_for_validation, item_key, request.row_num, request.line_id
+                    requested_qty_rounded, remaining_rounded, item_key, request.row_num, request.line_id
                 );
                 warn!("❌ BATCH_VALIDATION: {}", error_msg);
                 return Err(anyhow::anyhow!("INSUFFICIENT_BATCH_QUANTITY: {}", error_msg));
             }
             
             info!("✅ BATCH_VALIDATION: Batch validation passed - can pick {} bags from {} remaining (corrected from {})", 
-                  requested_qty, remaining_for_validation, remaining_qty);
+                  requested_qty_rounded, remaining_rounded, remaining_qty);
         } else {
             let error_msg = format!("Batch not found: run={}, row_num={}, line_id={}", 
                                     run_no, request.row_num, request.line_id);
@@ -1837,10 +1840,15 @@ impl Database {
         let picked_qty_f64 = self.safe_bigdecimal_to_f64(&picked_qty, "picked_qty_validation")?;
         let required_qty_f64 = self.safe_bigdecimal_to_f64(&required_qty, "required_qty_validation")?;
         
-        info!("📊 DEBUG: Quantity validation - picked: {} KG, required: {} KG", picked_qty_f64, required_qty_f64);
+        // ROUNDING FIX: Use 3-decimal rounding to prevent floating-point precision issues
+        let picked_qty_f64_rounded = self.round_to_3_decimals(picked_qty_f64);
+        let required_qty_f64_rounded = self.round_to_3_decimals(required_qty_f64);
         
-        if picked_qty > required_qty {
-            let error_msg = format!("Quantity picked is more than Qty Required {required_qty_f64} KG");
+        info!("📊 DEBUG: Quantity validation - picked: {} KG (rounded: {}), required: {} KG (rounded: {})", 
+              picked_qty_f64, picked_qty_f64_rounded, required_qty_f64, required_qty_f64_rounded);
+        
+        if self.qty_greater_than(picked_qty_f64_rounded, required_qty_f64_rounded) {
+            let error_msg = format!("Quantity picked is more than Qty Required {} KG", required_qty_f64_rounded);
             warn!("❌ DEBUG: BME4 validation failed - {}", error_msg);
             return Err(anyhow::anyhow!("QUANTITY_VALIDATION_FAILED: {}", error_msg));
         }
@@ -2824,44 +2832,50 @@ impl Database {
         let requested_qty = self.safe_bigdecimal_to_f64(&request.picked_bulk_qty, "validation_picked_bulk_qty")?;
         let batch_remaining = batch_to_picked_qty - batch_currently_picked;
         
+        // ROUNDING FIX: Use 3-decimal rounding to prevent floating-point precision issues
+        let requested_qty_rounded = self.round_to_3_decimals(requested_qty);
+        let batch_remaining_rounded = self.round_to_3_decimals(batch_remaining);
+        
         // **Validation Rule 1B**: Ingredient-level completion validation (total across all batches)  
         let ingredient_remaining = ingredient_total_required - ingredient_total_picked;
+        let ingredient_remaining_rounded = self.round_to_3_decimals(ingredient_remaining);
         
         info!(
-            "📊 BATCH VALIDATION: requested_qty={}, batch_remaining={} (batch: {:.1}/{:.1})",
-            requested_qty, batch_remaining, batch_currently_picked, batch_to_picked_qty
+            "📊 BATCH VALIDATION: requested_qty={} (rounded: {}), batch_remaining={} (rounded: {}) (batch: {:.1}/{:.1})",
+            requested_qty, requested_qty_rounded, batch_remaining, batch_remaining_rounded, 
+            batch_currently_picked, batch_to_picked_qty
         );
         
         info!(
-            "📊 INGREDIENT VALIDATION: ingredient_remaining={} (total: {:.1}/{:.1} bags across all batches)",
-            ingredient_remaining, ingredient_total_picked, ingredient_total_required
+            "📊 INGREDIENT VALIDATION: ingredient_remaining={} (rounded: {}) (total: {:.1}/{:.1} bags across all batches)",
+            ingredient_remaining, ingredient_remaining_rounded, ingredient_total_picked, ingredient_total_required
         );
         
         // First check: Validate against the specific batch being picked  
-        if requested_qty > batch_remaining {
-            let required_kg = batch_remaining * pack_size;
+        if self.qty_greater_than(requested_qty_rounded, batch_remaining_rounded) {
+            let required_kg = self.round_to_3_decimals(batch_remaining * pack_size);
             warn!(
                 "❌ BATCH OVER-PICKING: requested {} bags > batch remaining {} bags ({}KG) for Row{}",
-                requested_qty, batch_remaining, required_kg, request.row_num
+                requested_qty_rounded, batch_remaining_rounded, required_kg, request.row_num
             );
             
-            let error_msg = if batch_remaining <= 0.0 {
+            let error_msg = if batch_remaining_rounded <= 0.0 {
                 // Enhanced error for completed batches during pallet advancement
-                let remaining_ingredient = ingredient_total_required - ingredient_total_picked;
+                let remaining_ingredient = self.round_to_3_decimals(ingredient_total_required - ingredient_total_picked);
                 if remaining_ingredient > 0.0 {
                     format!("Pallet Row{} is completed ({batch_currently_picked:.1}/{batch_to_picked_qty:.1} bags). Ingredient has {remaining_ingredient:.1} bags remaining in other pallets.", request.row_num)
                 } else {
                     format!("This batch is already completed ({batch_currently_picked:.1}/{batch_to_picked_qty:.1} bags). Please refresh to load the next available batch.")
                 }
             } else {
-                format!("Cannot pick {requested_qty} bags from pallet Row{}. Only {batch_remaining:.1} bags remaining ({required_kg}KG)", request.row_num)
+                format!("Cannot pick {} bags from pallet Row{}. Only {} bags remaining ({}KG)", requested_qty_rounded, request.row_num, batch_remaining_rounded, required_kg)
             };
             
             return Ok(PickValidationResult {
                 is_valid: false,
                 error_message: Some(error_msg),
                 warnings: vec![],
-                max_allowed_quantity: Some(BigDecimal::from_f64(batch_remaining.max(0.0)).unwrap_or_default()),
+                max_allowed_quantity: Some(BigDecimal::from_f64(batch_remaining_rounded.max(0.0)).unwrap_or_default()),
                 available_inventory: None,
             });
         }
@@ -2888,7 +2902,8 @@ impl Database {
         }
         
         // Second check: Validate against ingredient totals for completion detection 
-        if ingredient_remaining <= 0.0 {
+        // ROUNDING FIX: Use rounded value from earlier calculation
+        if ingredient_remaining_rounded <= 0.0 {
             warn!(
                 "❌ INGREDIENT COMPLETED: Total ingredient already picked ({:.1}/{:.1} bags across all batches)",
                 ingredient_total_picked, ingredient_total_required
@@ -2938,16 +2953,21 @@ impl Database {
         if let Some(lot_row) = lot_rows.first() {
             let available_qty: f64 = lot_row.get("AvailableQty").unwrap_or(0.0);
             let requested_kg = requested_qty * pack_size;
+            
+            // ROUNDING FIX: Use 3-decimal rounding for lot availability comparison
+            let requested_kg_rounded = self.round_to_3_decimals(requested_kg);
+            let available_qty_rounded = self.round_to_3_decimals(available_qty);
 
-            if requested_kg > available_qty {
+            if self.qty_greater_than(requested_kg_rounded, available_qty_rounded) {
                 return Ok(PickValidationResult {
                     is_valid: false,
                     error_message: Some(format!(
-                        "Insufficient lot availability. Requested: {requested_kg:.1} KG, Available: {available_qty:.1} KG"
+                        "Insufficient lot availability. Requested: {:.3} KG, Available: {:.3} KG", 
+                        requested_kg_rounded, available_qty_rounded
                     )),
                     warnings: vec![],
-                    max_allowed_quantity: Some(BigDecimal::from_f64(available_qty / pack_size).unwrap_or_default()),
-                    available_inventory: Some(BigDecimal::from_f64(available_qty).unwrap_or_default()),
+                    max_allowed_quantity: Some(BigDecimal::from_f64(available_qty_rounded / pack_size).unwrap_or_default()),
+                    available_inventory: Some(BigDecimal::from_f64(available_qty_rounded).unwrap_or_default()),
                 });
             }
 
@@ -3457,6 +3477,20 @@ impl Database {
                 Err(anyhow::anyhow!("TYPE_CONVERSION_ERROR: {}", error_msg))
             }
         }
+    }
+
+    /// Round to 3 decimal places for consistent quantity comparisons
+    /// This prevents floating-point precision issues like 76.10999999999999 vs 76.11
+    fn round_to_3_decimals(&self, value: f64) -> f64 {
+        (value * 1000.0).round() / 1000.0
+    }
+
+    /// Tolerance-based "greater than" comparison for floating-point quantities
+    /// Returns true if `a > b + EPSILON` (where EPSILON = 0.0005 for 3 decimal precision)
+    /// This handles cases where 76.10999999999999 should be considered equal to 76.11
+    fn qty_greater_than(&self, a: f64, b: f64) -> bool {
+        const EPSILON: f64 = 0.0005; // Half of 0.001 for 3-decimal tolerance
+        a > b + EPSILON
     }
 
     /// Get inventory alerts for an item based on current stock levels and conditions

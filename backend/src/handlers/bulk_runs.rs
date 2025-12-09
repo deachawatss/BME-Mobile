@@ -222,12 +222,21 @@ pub async fn get_bulk_run_form_data(
     let service = BulkRunsService::new(database);
 
     match service.get_bulk_run_form_data(run_no, ingredient_index).await {
-        Ok(form_data) => {
+        Ok(Some(form_data)) => {
             info!("Successfully retrieved form data for run {}", run_no);
             Ok(Json(ApiResponse {
                 success: true,
-                data: form_data,
+                data: Some(form_data),
                 message: format!("Form data retrieved for run {run_no}"),
+            }))
+        }
+        Ok(None) => {
+            // Run exists but has no bulk picking requirements (ToPickedBulkQty = 0 for all ingredients)
+            warn!("Run {} has no bulk picking requirements", run_no);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                message: format!("Run {run_no} has no bulk picking requirements. All ingredients have ToPickedBulkQty = 0."),
             }))
         }
         Err(e) => {
@@ -235,7 +244,7 @@ pub async fn get_bulk_run_form_data(
             Ok(Json(ApiResponse {
                 success: false,
                 data: None,
-                message: "Failed to retrieve form data".to_string(),
+                message: format!("Failed to retrieve form data: {e}"),
             }))
         }
     }

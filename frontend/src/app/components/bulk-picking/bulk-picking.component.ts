@@ -1951,9 +1951,14 @@ export class BulkPickingComponent implements AfterViewInit {
       return;
     }
 
+    // Clear any previous error message before loading new data
+    this.errorMessage.set(null);
+
     this.bulkRunsService.getBulkRunFormData(runNo, ingredientIndex).subscribe({
       next: (response) => {
         if (response.success && response.data) {
+          // Clear error message on successful load
+          this.errorMessage.set(null);
           this.currentFormData.set(response.data);
           this.populateForm(response.data);
           // Load pallet tracking data for this run with current ingredient
