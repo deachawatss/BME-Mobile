@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2025-12-09
+
+### Fixed
+- **PNMAST Status Management**: Added automatic PNMAST status transitions 'R' → 'A' on first pick
+- **Status Reversion Logic**: Implemented PNMAST status reversion 'A' → 'R' when all ingredients are unpicked
+- **Complete Rollback**: Enhanced unpick operations to properly manage batch status changes
+- **Transaction Safety**: Added comprehensive status checks and logging for audit trail
+- **Multi-batch Support**: Handle PNMAST status management across multiple batches in single operation
+
 ## [1.0.1] - 2025-12-09
 
 ### Fixed

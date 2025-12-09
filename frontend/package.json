@@ -1,6 +1,6 @@
 {
   "name": "nwfth-bulk-picking",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "scripts": {
     "ng": "ng",
     "prestart": "node src/environments/load-env.js",

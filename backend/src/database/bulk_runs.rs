@@ -2474,6 +2474,34 @@ impl Database {
             }
         }
 
+        // **STEP 6b: UPDATE PNMAST STATUS** - Update PNMAST from 'R' to 'A' on first pick
+        // Only update if status is currently 'R' (Ready), leave 'A' (Active/Allocated) unchanged
+        info!("🔄 DEBUG: STEP 6b - Updating PNMAST status 'R' → 'A' for batch: {}", batch_info.batch_no);
+        
+        let update_pnmast_query = r#"
+            UPDATE PNMAST
+            SET Status = 'A'
+            WHERE BatchNo = @P1 AND Status = 'R'
+        "#;
+
+        let mut pnmast_stmt = TiberiusQuery::new(update_pnmast_query);
+        pnmast_stmt.bind(batch_info.batch_no.clone());
+
+        match pnmast_stmt.execute(&mut client).await {
+            Ok(result) => {
+                let rows_affected = result.rows_affected().iter().sum::<u64>();
+                if rows_affected > 0 {
+                    info!("✅ STEP_6b_SUCCESS: PNMAST status updated 'R' → 'A' for batch: {}", batch_info.batch_no);
+                } else {
+                    info!("ℹ️ STEP_6b_SKIP: PNMAST status already 'A' for batch: {}", batch_info.batch_no);
+                }
+            },
+            Err(e) => {
+                warn!("⚠️ STEP_6b_WARNING: Failed to update PNMAST status: {}. Continuing...", e);
+                // Non-critical: Continue even if PNMAST update fails
+            }
+        }
+
         // **SMART COMPLETION**: Step 7 completion check - Only triggers when ALL item keys are completely picked
         // Status changes NEW → PRINT automatically only when the FINAL pick of the LAST ingredient is completed
         // This ensures status change happens once when truly all ingredients are done, not after each individual pick
@@ -4382,12 +4410,68 @@ impl Database {
                     return Err(anyhow::anyhow!("STEP_7_REVERT_FAILED: {}", error_msg));
                 }
             }
+
+            // **STEP 7b: CHECK AND REVERT PNMAST STATUS**
+            // If all PNITEM.User11 for this batch are NULL, revert PNMAST status to 'R'
+            info!("🔄 DEBUG: STEP 7b - Checking PNMAST status reversion for batch: {}", batch_no);
+            
+            let check_pnitem_query = r#"
+                SELECT COUNT(*) as active_count
+                FROM PNITEM
+                WHERE BatchNo = @P1 AND User11 IS NOT NULL
+            "#;
+            
+            let mut check_stmt = TiberiusQuery::new(check_pnitem_query);
+            check_stmt.bind(batch_no.as_str());
+            
+            // Extract value first to release the borrow on client
+            let active_count: Option<i32> = if let Ok(stream) = check_stmt.query(client).await {
+                if let Ok(Some(r)) = stream.into_row().await {
+                    r.get::<i32, _>(0)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // Now safe to use client again
+            if let Some(count) = active_count {
+                if count == 0 {
+                    // All PNITEM.User11 are NULL - revert PNMAST to 'R'
+                    let revert_pnmast_query = r#"
+                        UPDATE PNMAST
+                        SET Status = 'R'
+                        WHERE BatchNo = @P1 AND Status = 'A'
+                    "#;
+                    
+                    let mut revert_stmt = TiberiusQuery::new(revert_pnmast_query);
+                    revert_stmt.bind(batch_no.as_str());
+                    
+                    match revert_stmt.execute(client).await {
+                        Ok(result) => {
+                            let rows_affected = result.rows_affected().iter().sum::<u64>();
+                            if rows_affected > 0 {
+                                info!("✅ STEP_7b_SUCCESS: PNMAST status reverted 'A' → 'R' for batch: {} (all User11 NULL)", batch_no);
+                            } else {
+                                info!("ℹ️ STEP_7b_SKIP: PNMAST status already 'R' for batch: {}", batch_no);
+                            }
+                        },
+                        Err(e) => {
+                            warn!("⚠️ STEP_7b_WARNING: Failed to revert PNMAST status: {}. Continuing...", e);
+                        }
+                    }
+                } else {
+                    info!("ℹ️ STEP_7b_SKIP: PNMAST status remains 'A' for batch: {} ({} active PNITEM rows)", batch_no, count);
+                }
+            }
         } else {
             info!("ℹ️ Skipping PNITEM revert (Qty: {}, BatchNo: '{}')", total_qty_to_rollback, batch_no);
         }
 
         // Ensure transaction commit completion
         info!("🔄 Transaction completed for unpick operation - database state now consistent");
+
 
         // Return summary
         Ok(serde_json::json!({
@@ -4447,11 +4531,20 @@ impl Database {
         let mut total_errors = Vec::new();
         let total_ingredients = rows.len();
 
+        // Collect unique batch numbers for PNMAST status check
+        let mut unique_batches: std::collections::HashSet<String> = std::collections::HashSet::new();
+        
         // Process each ingredient
         for row in rows {
             let row_num: i32 = row.get("RowNum").unwrap_or(0);
             let line_id: i32 = row.get("LineId").unwrap_or(0);
             let item_key: &str = row.get("ItemKey").unwrap_or("");
+            let batch_no: &str = row.get("BatchNo").unwrap_or("");
+            
+            // Collect batch number for later PNMAST check
+            if !batch_no.is_empty() {
+                unique_batches.insert(batch_no.to_string());
+            }
 
             info!("🎯 Unpicking ingredient: {} (row: {}, line: {})", item_key, row_num, line_id);
 
@@ -4473,6 +4566,59 @@ impl Database {
                 Err(e) => {
                     error!("❌ Failed to unpick ingredient {}: {}", item_key, e);
                     total_errors.push(format!("Failed to unpick {item_key}: {e}"));
+                }
+            }
+        }
+
+        // **FINAL PNMAST STATUS CHECK** - Check and revert PNMAST for all unique batches
+        // This is a final pass to ensure all batch statuses are correctly reverted
+        info!("🔄 DEBUG: Final PNMAST status check for {} unique batches", unique_batches.len());
+        
+        for batch_no in &unique_batches {
+            let check_pnitem_query = r#"
+                SELECT COUNT(*) as active_count
+                FROM PNITEM
+                WHERE BatchNo = @P1 AND User11 IS NOT NULL
+            "#;
+            
+            let mut check_stmt = tiberius::Query::new(check_pnitem_query);
+            check_stmt.bind(batch_no.as_str());
+            
+            // Extract value first to release the borrow on client
+            let active_count: Option<i32> = if let Ok(stream) = check_stmt.query(&mut client).await {
+                if let Ok(Some(r)) = stream.into_row().await {
+                    r.get::<i32, _>(0)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // Now safe to use client again
+            if let Some(count) = active_count {
+                if count == 0 {
+                    // All PNITEM.User11 are NULL - revert PNMAST to 'R'
+                    let revert_pnmast_query = r#"
+                        UPDATE PNMAST
+                        SET Status = 'R'
+                        WHERE BatchNo = @P1 AND Status = 'A'
+                    "#;
+                    
+                    let mut revert_stmt = tiberius::Query::new(revert_pnmast_query);
+                    revert_stmt.bind(batch_no.as_str());
+                    
+                    match revert_stmt.execute(&mut client).await {
+                        Ok(result) => {
+                            let rows_affected = result.rows_affected().iter().sum::<u64>();
+                            if rows_affected > 0 {
+                                info!("✅ PNMAST_REVERT_SUCCESS: Status reverted 'A' → 'R' for batch: {} (all User11 NULL)", batch_no);
+                            }
+                        },
+                        Err(e) => {
+                            warn!("⚠️ PNMAST_REVERT_WARNING: Failed to revert status for batch {}: {}", batch_no, e);
+                        }
+                    }
                 }
             }
         }
@@ -4806,6 +4952,60 @@ impl Database {
             }
         }
 
+        // **STEP 8b: CHECK AND REVERT PNMAST STATUS**
+        // If all PNITEM.User11 for this batch are NULL, revert PNMAST status to 'R'
+        info!("🔄 DEBUG: STEP 8b - Checking PNMAST status reversion for batch: {}", batch_no);
+        
+        let check_pnitem_query = r#"
+            SELECT COUNT(*) as active_count
+            FROM PNITEM
+            WHERE BatchNo = @P1 AND User11 IS NOT NULL
+        "#;
+        
+        let mut check_stmt = TiberiusQuery::new(check_pnitem_query);
+        check_stmt.bind(batch_no);
+        
+        // Extract value first to release the borrow on client
+        let active_count: Option<i32> = if let Ok(stream) = check_stmt.query(client).await {
+            if let Ok(Some(r)) = stream.into_row().await {
+                r.get::<i32, _>(0)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Now safe to use client again
+        if let Some(count) = active_count {
+            if count == 0 {
+                // All PNITEM.User11 are NULL - revert PNMAST to 'R'
+                let revert_pnmast_query = r#"
+                    UPDATE PNMAST
+                    SET Status = 'R'
+                    WHERE BatchNo = @P1 AND Status = 'A'
+                "#;
+                
+                let mut revert_stmt = TiberiusQuery::new(revert_pnmast_query);
+                revert_stmt.bind(batch_no);
+                
+                match revert_stmt.execute(client).await {
+                    Ok(result) => {
+                        let rows_affected = result.rows_affected().iter().sum::<u64>();
+                        if rows_affected > 0 {
+                            info!("✅ STEP_8b_SUCCESS: PNMAST status reverted 'A' → 'R' for batch: {} (all User11 NULL)", batch_no);
+                        } else {
+                            info!("ℹ️ STEP_8b_SKIP: PNMAST status already 'R' for batch: {}", batch_no);
+                        }
+                    },
+                    Err(e) => {
+                        warn!("⚠️ STEP_8b_WARNING: Failed to revert PNMAST status: {}. Continuing...", e);
+                    }
+                }
+            } else {
+                info!("ℹ️ STEP_8b_SKIP: PNMAST status remains 'A' for batch: {} ({} active PNITEM rows)", batch_no, count);
+            }
+        }
 
         // Return summary
         Ok(serde_json::json!({
